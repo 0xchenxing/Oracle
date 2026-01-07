@@ -69,6 +69,7 @@ export const NETWORK_CONFIGS = {
       symbol: 'BNB',
       decimals: 18
     },
+    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
     contractAddress: '0x317115662F6598935032409a66D217B38Ca75980'
   }
 };
@@ -88,4 +89,25 @@ export const getCurrentContractAddress = (chainId) => {
 export const isContractConfigured = (chainId) => {
   const address = getCurrentContractAddress(chainId);
   return address && address !== null;
+};
+
+// 获取第一个配置了合约的网络
+export const getFirstConfiguredNetwork = () => {
+  for (const [chainId, config] of Object.entries(NETWORK_CONFIGS)) {
+    if (config.contractAddress && config.contractAddress !== null) {
+      return chainId;
+    }
+  }
+  return null;
+};
+
+// 获取配置了合约的网络列表
+export const getConfiguredNetworks = () => {
+  const configured = [];
+  for (const [chainId, config] of Object.entries(NETWORK_CONFIGS)) {
+    if (config.contractAddress && config.contractAddress !== null) {
+      configured.push({ chainId, ...config });
+    }
+  }
+  return configured;
 };

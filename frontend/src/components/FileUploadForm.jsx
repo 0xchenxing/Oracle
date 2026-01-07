@@ -12,9 +12,40 @@ import DataSerializer, { toHexString } from '../utils/dataSerializer';
 // 导入Wagmi hooks
 import { useAccount, useSignMessage, useContractWrite, useContractRead, usePrepareContractWrite } from 'wagmi';
 // 导入网络配置
-import { NETWORK_CONFIGS, getCurrentContractAddress, isContractConfigured } from '../config/networks';
+import { NETWORK_CONFIGS, getCurrentContractAddress, isContractConfigured, getFirstConfiguredNetwork, getConfiguredNetworks } from '../config/networks';
 
 const { TextArea } = Input;
+
+const simplifyError = (error) => {
+  const message = error.message || String(error);
+  
+  if (message.includes('Data not found') || message.includes('execution reverted')) {
+    return '未找到数据，请检查项目ID和日期是否正确';
+  }
+  if (message.includes('user rejected') || message.includes('User rejected')) {
+    return '用户取消操作';
+  }
+  if (message.includes('timeout') || message.includes('Timeout')) {
+    return '请求超时，请稍后重试';
+  }
+  if (message.includes('insufficient funds')) {
+    return '余额不足，请确保钱包有足够的 Gas';
+  }
+  if (message.includes('nonce')) {
+    return '交易序号错误，请刷新页面后重试';
+  }
+  if (message.includes('already submitted')) {
+    return '数据已提交，不能重复上传';
+  }
+  if (message.includes('Unauthorized') || message.includes('not authorized')) {
+    return '未授权操作，请确认是否有权限';
+  }
+  if (message.includes('Contract target') || message.includes('INVALID_ARGUMENT')) {
+    return '合约配置错误，请检查网络配置';
+  }
+  
+  return message.split('\n')[0].slice(0, 100);
+};
 
 const FileUploadForm = () => {
   // 响应式断点检测
@@ -34,23 +65,32 @@ const FileUploadForm = () => {
   
   // 获取当前网络ID
   useEffect(() => {
-    const getCurrentChainId = async () => {
-      if (window.ethereum) {
-        try {
-          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-          setCurrentChainId(parseInt(chainId, 16).toString());
-        } catch (error) {
-          console.error('获取网络ID失败:', error);
-        }
-      }
-    };
-    
-    getCurrentChainId();
-    
     // 监听网络变化
     if (window.ethereum) {
-      window.ethereum.on('chainChanged', (chainId) => {
-        setCurrentChainId(parseInt(chainId, 16).toString());
+      window.ethereum.on('chainChanged', async (chainId) => {
+        const chainIdStr = parseInt(chainId, 16).toString();
+        
+        // 检查新网络是否有合约配置
+        if (!isContractConfigured(chainIdStr)) {
+          const firstConfiguredChainId = getFirstConfiguredNetwork();
+          if (firstConfiguredChainId) {
+            const targetChainId = NETWORK_CONFIGS[firstConfiguredChainId]?.chainId;
+            if (targetChainId) {
+              try {
+                await window.ethereum.request({
+                  method: 'wallet_switchEthereumChain',
+                  params: [{ chainId: targetChainId }],
+                });
+                return;
+              } catch (switchError) {
+                console.error('切换网络失败:', switchError);
+                message.warning(`当前网络 ${NETWORK_CONFIGS[chainIdStr]?.name || '未知网络'} 未配置合约，请切换到有合约的网络`);
+              }
+            }
+          }
+        }
+        
+        setCurrentChainId(chainIdStr);
       });
     }
     
@@ -241,7 +281,7 @@ const FileUploadForm = () => {
       if (error.message.includes('limit exceeded')) {
         message.error('获取项目列表失败：区块链数据量过大，请稍后重试或联系管理员');
       } else {
-        message.error('获取项目列表失败：' + error.message);
+        message.error('获取项目列表失败：' + simplifyError(error));
       }
     } finally {
       setIsLoadingProjects(false);
@@ -356,7 +396,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('[handleGrantRole] 授予角色失败:', error);
       message.destroy();
-      message.error('角色授予失败：' + (error.message || '未知错误'));
+      message.error('角色授予失败：' + simplifyError(error));
     } finally {
       setGrantRoleLoading(false);
     }
@@ -414,7 +454,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('[handleRevokeRole] 撤销角色失败:', error);
       message.destroy();
-      message.error('角色撤销失败：' + (error.message || '未知错误'));
+      message.error('角色撤销失败：' + simplifyError(error));
     } finally {
       setRevokeRoleLoading(false);
     }
@@ -470,7 +510,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('[directRevokeRole] 撤销角色失败:', error);
       message.destroy();
-      message.error('角色撤销失败：' + (error.message || '未知错误'));
+      message.error('角色撤销失败：' + simplifyError(error));
     } finally {
       setRevokeRoleLoading(false);
     }
@@ -720,7 +760,7 @@ const FileUploadForm = () => {
       setIsProcessing(false);
       console.error('上传失败:', error);
       console.error('错误详情:', error.config);
-      message.error('上传失败：' + (error.response?.data?.error || error.message));
+      message.error('上传失败：' + simplifyError(error));
       if (error.response) {
         console.error('响应数据:', error.response.data);
         console.error('响应状态:', error.response.status);
@@ -901,7 +941,7 @@ const FileUploadForm = () => {
       }
     } catch (error) {
       console.error('合约提交失败:', error);
-      message.error('合约提交失败：' + error.message);
+      message.error('合约提交失败：' + simplifyError(error));
       throw error;
     }
   };
@@ -984,7 +1024,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('项目注册失败:', error);
       message.destroy();
-      message.error('项目注册失败：' + error.message);
+      message.error('项目注册失败：' + simplifyError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -1046,10 +1086,10 @@ const FileUploadForm = () => {
 
       if (error.name === 'AbortError') {
         message.error('查询超时，请稍后重试');
-      } else if (error.message.includes('user rejected')) {
+      } else if (error.message && error.message.includes('user rejected')) {
         message.warning('用户取消操作');
       } else {
-        message.error('数据查询失败：' + (error.message || '未知错误'));
+        message.error('数据查询失败：' + simplifyError(error));
       }
     } finally {
       setIsQuerying(false);
@@ -1111,7 +1151,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('获取项目配置失败:', error);
       message.destroy();
-      message.error('获取项目配置失败：' + error.message);
+      message.error('获取项目配置失败：' + simplifyError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -1165,7 +1205,7 @@ const FileUploadForm = () => {
       } else if (error.message.includes('user rejected')) {
         message.warning('用户取消操作');
       } else {
-        message.error('获取核心数据失败：' + (error.message || '未知错误'));
+        message.error('获取核心数据失败：' + simplifyError(error));
       }
     } finally {
       setIsQuerying(false);
@@ -1212,7 +1252,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('获取数据哈希失败:', error);
       message.destroy();
-      message.error('获取数据哈希失败：' + error.message);
+      message.error('获取数据哈希失败：' + simplifyError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -1254,7 +1294,7 @@ const FileUploadForm = () => {
     } catch (error) {
       console.error('添加授权人失败:', error);
       message.destroy();
-      message.error('添加授权人失败：' + error.message);
+      message.error('添加授权人失败：' + simplifyError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -1435,10 +1475,10 @@ const FileUploadForm = () => {
 
       if (error.name === 'AbortError') {
         message.error('查询超时，请稍后重试');
-      } else if (error.message.includes('user rejected')) {
+      } else if (error.message && error.message.includes('user rejected')) {
         message.warning('用户取消操作');
       } else {
-        message.error('数据查询失败：' + (error.message || '未知错误'));
+        message.error('数据查询失败：' + simplifyError(error));
       }
     } finally {
       setIsQuerying(false);
@@ -2144,7 +2184,7 @@ const FileUploadForm = () => {
                   );
                 } catch (error) {
                   console.error('解析核心数据失败:', error);
-                  return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#ff4d4f' }}>解析失败: {error.message}</p>;
+                  return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#ff4d4f' }}>解析失败: {simplifyError(error)}</p>;
                 }
               })()}
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all' }}>{dataResult.dataHash}</span></p>
