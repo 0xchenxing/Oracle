@@ -65,32 +65,23 @@ const FileUploadForm = () => {
   
   // 获取当前网络ID
   useEffect(() => {
+    const getCurrentChainId = async () => {
+      if (window.ethereum) {
+        try {
+          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+          setCurrentChainId(parseInt(chainId, 16).toString());
+        } catch (error) {
+          console.error('获取网络ID失败:', error);
+        }
+      }
+    };
+    
+    getCurrentChainId();
+    
     // 监听网络变化
     if (window.ethereum) {
-      window.ethereum.on('chainChanged', async (chainId) => {
-        const chainIdStr = parseInt(chainId, 16).toString();
-        
-        // 检查新网络是否有合约配置
-        if (!isContractConfigured(chainIdStr)) {
-          const firstConfiguredChainId = getFirstConfiguredNetwork();
-          if (firstConfiguredChainId) {
-            const targetChainId = NETWORK_CONFIGS[firstConfiguredChainId]?.chainId;
-            if (targetChainId) {
-              try {
-                await window.ethereum.request({
-                  method: 'wallet_switchEthereumChain',
-                  params: [{ chainId: targetChainId }],
-                });
-                return;
-              } catch (switchError) {
-                console.error('切换网络失败:', switchError);
-                message.warning(`当前网络 ${NETWORK_CONFIGS[chainIdStr]?.name || '未知网络'} 未配置合约，请切换到有合约的网络`);
-              }
-            }
-          }
-        }
-        
-        setCurrentChainId(chainIdStr);
+      window.ethereum.on('chainChanged', (chainId) => {
+        setCurrentChainId(parseInt(chainId, 16).toString());
       });
     }
     

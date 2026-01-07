@@ -69,7 +69,7 @@ export const NETWORK_CONFIGS = {
       symbol: 'BNB',
       decimals: 18
     },
-    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
+    // rpcUrl: 'https://data-seed-prebsc-1-s3.bnbchain.org:8545',
     contractAddress: '0x317115662F6598935032409a66D217B38Ca75980'
   }
 };
