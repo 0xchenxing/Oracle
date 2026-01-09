@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Input, Form, Upload, message, Steps, Spin, Alert, Tabs, Card, Select, Table, Tag, Calendar, Modal, Tooltip, List, Empty, Divider, DatePicker } from 'antd';
-import { UploadOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, DatabaseOutlined, UserOutlined, SettingOutlined, CopyOutlined, TeamOutlined, SafetyCertificateOutlined, CloudUploadOutlined } from '@ant-design/icons';
+import { Button, Input, Form, Upload, message, Steps, Spin, Alert, Tabs, Card, Select, Table, Tag, Calendar, Modal, Tooltip, List, Empty, Divider, DatePicker, Pagination } from 'antd';
+import { UploadOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, DatabaseOutlined, UserOutlined, SettingOutlined, CopyOutlined, TeamOutlined, SafetyCertificateOutlined, CloudUploadOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useMediaQuery } from 'react-responsive';
 import sha256 from 'sha256';
 import axios from 'axios';
@@ -10,7 +10,7 @@ import { OracleABI } from '../contracts/OracleABI';
 // 导入序列化器
 import DataSerializer, { toHexString } from '../utils/dataSerializer';
 // 导入Wagmi hooks
-import { useAccount, useSignMessage, useContractWrite, useContractRead, usePrepareContractWrite } from 'wagmi';
+import { useAccount, useSignMessage, useContractWrite, useContractRead, usePrepareContractWrite, useSwitchChain } from 'wagmi';
 // 导入网络配置
 import { NETWORK_CONFIGS, getCurrentContractAddress, isContractConfigured, getFirstConfiguredNetwork, getConfiguredNetworks } from '../config/networks';
 
@@ -59,6 +59,7 @@ const FileUploadForm = () => {
 
   // 使用Wagmi hooks获取账户信息
   const { address, isConnected } = useAccount();
+  const { switchChain } = useSwitchChain();
   
   // 动态获取当前网络信息
   const [currentChainId, setCurrentChainId] = useState(null);
@@ -92,6 +93,61 @@ const FileUploadForm = () => {
     };
   }, [isConnected]);
   
+  // 检查当前网络是否配置了合约，如果没有则自动切换到第一个配置了合约的网络
+  useEffect(() => {
+    const checkAndSwitchNetwork = async () => {
+      console.log('网络切换检查开始');
+      console.log('isConnected:', isConnected);
+      console.log('currentChainId:', currentChainId);
+      
+      if (isConnected && currentChainId) {
+        const isContractAvailable = isContractConfigured(currentChainId);
+        console.log('当前网络合约是否可用:', isContractAvailable);
+        
+        if (!isContractAvailable) {
+          const firstConfiguredNetwork = getFirstConfiguredNetwork();
+          console.log('第一个配置了合约的网络:', firstConfiguredNetwork);
+          console.log('switchChain函数:', switchChain);
+          
+          if (firstConfiguredNetwork && switchChain) {
+            const configuredChainId = parseInt(firstConfiguredNetwork, 10);
+            console.log('第一个配置了合约的网络ID:', configuredChainId);
+            
+            // 从Wagmi的chains中动态获取对应的chain对象
+            const { mainnet, polygon, optimism, arbitrum, base, polygonMumbai, sepolia, bsc, bscTestnet } = require('wagmi/chains');
+            const allChains = [mainnet, polygon, optimism, arbitrum, base, polygonMumbai, sepolia, bsc, bscTestnet];
+            const targetChain = allChains.find(chain => chain.id === configuredChainId);
+            
+            console.log('找到的目标链对象:', targetChain);
+            
+            if (targetChain) {
+              try {
+                console.log('准备调用switchChain');
+                // 使用动态找到的chain对象进行切换
+                await switchChain({ chainId: targetChain.id });
+                message.success(`已自动切换到已配置Oracle合约的网络: ${NETWORK_CONFIGS[firstConfiguredNetwork].name}`);
+                console.log('网络切换成功');
+              } catch (error) {
+                console.error('自动切换网络失败:', error);
+                console.error('错误名称:', error.name);
+                console.error('错误消息:', error.message);
+                console.error('错误堆栈:', error.stack);
+                message.error('自动切换网络失败，请手动切换到已配置Oracle合约的网络');
+              }
+            } else {
+              console.error('在Wagmi的chains中找不到对应的链对象:', configuredChainId);
+              message.error('自动切换网络失败，找不到对应的网络配置');
+            }
+          } else {
+            console.log('没有配置的网络或switchChain函数不可用');
+          }
+        }
+      }
+    };
+    
+    checkAndSwitchNetwork();
+  }, [isConnected, currentChainId, switchChain]);
+  
   // 动态获取合约地址
   const contractAddress = getCurrentContractAddress(currentChainId);
   
@@ -120,6 +176,20 @@ const FileUploadForm = () => {
   const [activeView, setActiveView] = useState('projects'); // 当前激活的视图：projects, upload, query, register, addAuthorizer, roleManagement
   const [draftSaved, setDraftSaved] = useState(false); // 草稿保存状态
 
+  // 新增：高级查询状态
+  const [activeQueryTab, setActiveQueryTab] = useState('latest'); // 当前激活的查询页签：latest(最新数据), historical(历史数据)
+  const [latestDataResult, setLatestDataResult] = useState(null); // 最新数据查询结果
+  const [dataIdsResult, setDataIdsResult] = useState([]); // 数据ID列表查询结果
+  const [dataIdsByPrefixResult, setDataIdsByPrefixResult] = useState([]); // 按前缀查询数据ID结果
+  const [dataIdsByYearMonthResult, setDataIdsByYearMonthResult] = useState([]); // 按年月查询数据ID结果
+  const [dataByYearMonthResult, setDataByYearMonthResult] = useState({}); // 按年月查询完整数据结果，按月份分组
+  const [currentPage, setCurrentPage] = useState(1); // 当前页码
+  const [pageSize, setPageSize] = useState(10); // 每页条数
+  const [latestDataByYearMonthResult, setLatestDataByYearMonthResult] = useState(null); // 按年月查询最新数据结果
+  // 日期选择器状态
+  const [startYearMonth, setStartYearMonth] = useState(null); // 开始年月
+  const [endYearMonth, setEndYearMonth] = useState(null); // 结束年月
+
   // 角色管理状态
   const [adminList, setAdminList] = useState([]); // 管理员列表
   const [dataUploaderList, setDataUploaderList] = useState([]); // 数据上传者列表
@@ -141,12 +211,13 @@ const FileUploadForm = () => {
     }
   }, [isConnected]);
 
+  // 组件初始化完成后，检查所有配置条件，确保项目列表能够及时加载
   // 监听ProjectRegistered事件获取项目列表并过滤授权项目
   useEffect(() => {
-    if (isConnected && contractOwner && currentChainId) {
+    if (isConnected && contractAddress && currentChainId) {
       fetchProjectList();
     }
-  }, [isConnected, contractOwner, currentChainId]);
+  }, [isConnected, contractAddress, currentChainId, address]);
 
   // 获取合约所有者
   const fetchContractOwner = async () => {
@@ -161,6 +232,33 @@ const FileUploadForm = () => {
       console.error('获取合约所有者失败:', error);
     }
   };
+
+  // 自动查询最新数据当项目被选择或切换到最新数据页签
+  useEffect(() => {
+    if (selectedProject && isConnected && activeView === 'query') {
+      fetchLatestDataAndId();
+    }
+  }, [selectedProject, isConnected, activeView]);
+
+  // 当切换到最新数据页签时自动查询数据
+  useEffect(() => {
+    if (selectedProject && isConnected && activeView === 'query' && activeQueryTab === 'latest') {
+      fetchLatestDataAndId();
+    }
+  }, [selectedProject, isConnected, activeView, activeQueryTab]);
+
+  // 历史数据页签不再自动查询数据，改为点击查询按钮后手动查询
+  // useEffect(() => {
+  //   if (selectedProject && isConnected && activeView === 'query' && activeQueryTab === 'historical') {
+  //     handleGetAllDataIdsAndData();
+  //   }
+  // }, [selectedProject, isConnected, activeView, activeQueryTab]);
+
+  // 切换页签时只清空最新数据结果，保留历史数据查询结果
+  useEffect(() => {
+    // 当切换到历史数据页签时，不清空历史数据结果
+    // 当切换到最新数据页签时，确保最新数据会自动刷新
+  }, [activeQueryTab]);
 
   // 获取项目列表并过滤授权项目
   const fetchProjectList = async () => {
@@ -331,6 +429,91 @@ const FileUploadForm = () => {
     } finally {
       setIsLoadingRoles(false);
       console.log('[fetchRoleList] ========== 获取角色列表完成 ==========');
+    }
+  };
+
+  const fetchLatestDataAndId = async () => {
+    if (!selectedProject || !selectedProject.originalPid) {
+      throw new Error('未选择项目');
+    }
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(contractAddress, OracleABI, provider);
+
+    const [data, did] = await Promise.all([
+      contract.getLatestData(selectedProject.originalPid),
+      contract.getLatestDataId(selectedProject.originalPid)
+    ]);
+
+    // 确保coreData被转换为正确的格式（Uint8Array或十六进制字符串）
+    let coreData;
+    if (typeof data.coreData === 'string') {
+      // 如果已经是字符串，直接使用
+      coreData = data.coreData;
+    } else if (data.coreData?.toHexString) {
+      // 如果是ethers.js的Bytes对象，转换为十六进制字符串
+      coreData = data.coreData.toHexString();
+    } else if (data.coreData instanceof Uint8Array) {
+      // 如果已经是Uint8Array，直接使用
+      coreData = data.coreData;
+    } else {
+      // 其他情况，尝试转换为十六进制字符串
+      coreData = JSON.stringify(data.coreData);
+      console.error(`不支持的coreData类型: ${typeof data.coreData}`);
+    }
+    
+    const latestData = {
+      pid: data.pid,
+      did: data.did,
+      coreData: coreData,
+      dataHash: data.dataHash,
+      submitter: data.submitter,
+      submitTime: new Date(Number(data.submitTime) * 1000).toISOString()
+    };
+
+    setLatestDataResult(latestData);
+  };
+
+  const fetchAllDataIdsAndData = async () => {
+    if (!selectedProject || !selectedProject.originalPid) {
+      throw new Error('未选择项目');
+    }
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(contractAddress, OracleABI, provider);
+
+    const dids = await contract.getDataIds(selectedProject.originalPid);
+    setDataIdsResult(dids);
+
+    if (dids.length > 0) {
+      const latestDid = dids[dids.length - 1];
+      const data = await contract.getData(selectedProject.originalPid, latestDid);
+
+      // 确保coreData被转换为正确的格式（Uint8Array或十六进制字符串）
+      let coreData;
+      if (typeof data.coreData === 'string') {
+        // 如果已经是字符串，直接使用
+        coreData = data.coreData;
+      } else if (data.coreData?.toHexString) {
+        // 如果是ethers.js的Bytes对象，转换为十六进制字符串
+        coreData = data.coreData.toHexString();
+      } else if (data.coreData instanceof Uint8Array) {
+        // 如果已经是Uint8Array，直接使用
+        coreData = data.coreData;
+      } else {
+        // 其他情况，尝试转换为十六进制字符串
+        coreData = JSON.stringify(data.coreData);
+        console.error(`不支持的coreData类型: ${typeof data.coreData}`);
+      }
+
+      setLatestDataResult({
+        pid: data.pid,
+        did: data.did,
+        coreData: coreData,
+        dataHash: data.dataHash,
+        submitter: data.submitter,
+        submitTime: new Date(Number(data.submitTime) * 1000).toISOString()
+      });
     }
   };
 
@@ -1021,233 +1204,6 @@ const FileUploadForm = () => {
     }
   };
 
-  // Oracle操作：数据查询
-  const handleQueryData = async (values) => {
-    if (isQuerying) {
-      message.warning('查询进行中，请稍候...');
-      return;
-    }
-
-    if (!isConnected) {
-      message.error('请先连接钱包');
-      return;
-    }
-
-    const { projectId, dataDate } = values;
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), 30000);
-
-    setIsQuerying(true);
-    message.loading('正在查询数据...', 0);
-
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const contract = new ethers.Contract(contractAddress, OracleABI, provider);
-
-      const dataDateStr = dayjs.isDayjs(dataDate) ? dataDate.format('YYYY-MM-DD') : dataDate;
-      const [year, month, day] = dataDateStr.split('-');
-      const yearNum = parseInt(year, 10);
-      const monthNum = parseInt(month, 10);
-      const dayNum = parseInt(day, 10);
-
-      const did = await contract.encodeYearMonthDayToDid(yearNum, monthNum, dayNum, { signal: abortController.signal });
-
-      const data = await contract.getData(
-        ethers.encodeBytes32String(projectId),
-        did,
-        { signal: abortController.signal }
-      );
-
-      clearTimeout(timeoutId);
-      message.destroy();
-      message.success('数据查询成功！');
-
-      setDataResult({
-        pid: data.pid,
-        did: data.did,
-        coreData: data.coreData,
-        dataHash: data.dataHash,
-        submitter: data.submitter,
-        submitTime: new Date(Number(data.submitTime) * 1000).toISOString()
-      });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      console.error('数据查询失败:', error);
-      message.destroy();
-
-      if (error.name === 'AbortError') {
-        message.error('查询超时，请稍后重试');
-      } else if (error.message && error.message.includes('user rejected')) {
-        message.warning('用户取消操作');
-      } else {
-        message.error('数据查询失败：' + simplifyError(error));
-      }
-    } finally {
-      setIsQuerying(false);
-    }
-  };
-
-  // Oracle操作：获取项目配置
-  const handleGetProjectConfig = async (values) => {
-    try {
-      message.loading('正在获取项目配置...', 0);
-      setIsProcessing(true);
-
-      // 检查钱包连接状态
-      if (!isConnected) {
-        message.error('请先连接钱包');
-        throw new Error('钱包未连接');
-      }
-      
-      // 连接到以太坊网络
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      // 合约地址（已在组件顶部全局配置）
-      const contract = new ethers.Contract(contractAddress, OracleABI, signer);
-
-      // 执行合约调用
-      const config = await contract.getProjectConfig(
-        ethers.encodeBytes32String(values.projectId) // 统一使用encodeBytes32String转换
-      );
-
-      message.destroy();
-      message.success('项目配置获取成功！');
-      
-      // 处理bytes类型的description - 修复：添加对十六进制字符串的处理
-      let description = '';
-      if (config.description) {
-        if (typeof config.description === 'string') {
-          // 检查是否是十六进制字符串
-          if (config.description.startsWith('0x')) {
-            // 如果是十六进制字符串，转换为UTF-8
-            description = ethers.toUtf8String(config.description);
-          } else {
-            // 普通字符串直接使用
-            description = config.description;
-          }
-        } else if (config.description._hex) {
-          // 如果是bytes类型，转换为字符串
-          description = ethers.toUtf8String(config.description);
-        }
-      }
-      
-      setProjectConfig({
-        owner: config.owner,
-        isActive: config.isActive,
-        authorizedSubmitters: config.authorizedSubmitters,
-        dataTTL: Number(config.dataTTL),
-        description: description // 添加项目描述
-      });
-    } catch (error) {
-      console.error('获取项目配置失败:', error);
-      message.destroy();
-      message.error('获取项目配置失败：' + simplifyError(error));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Oracle操作：获取核心数据
-  const handleGetCoreData = async (values) => {
-    if (isQuerying) {
-      message.warning('操作进行中，请稍候...');
-      return;
-    }
-
-    if (!isConnected) {
-      message.error('请先连接钱包');
-      return;
-    }
-
-    const { projectId, dataDate } = values;
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), 30000);
-
-    setIsQuerying(true);
-    message.loading('正在获取核心数据...', 0);
-
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const contract = new ethers.Contract(contractAddress, OracleABI, provider);
-
-      const dataDateStr = dayjs.isDayjs(dataDate) ? dataDate.format('YYYY-MM-DD') : dataDate;
-      const [year, month, day] = dataDateStr.split('-');
-      const did = ethers.keccak256(ethers.toUtf8Bytes(`${year}${month}${day}`));
-
-      const coreData = await contract.getCoreData(
-        ethers.encodeBytes32String(projectId),
-        did,
-        { signal: abortController.signal }
-      );
-
-      clearTimeout(timeoutId);
-      message.destroy();
-      message.success('核心数据获取成功！');
-
-      setCoreDataResult(coreData);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      console.error('获取核心数据失败:', error);
-      message.destroy();
-
-      if (error.name === 'AbortError') {
-        message.error('操作超时，请稍后重试');
-      } else if (error.message.includes('user rejected')) {
-        message.warning('用户取消操作');
-      } else {
-        message.error('获取核心数据失败：' + simplifyError(error));
-      }
-    } finally {
-      setIsQuerying(false);
-    }
-  };
-
-  // Oracle操作：获取数据哈希
-  const handleGetDataHash = async (values) => {
-    try {
-      message.loading('正在获取数据哈希...', 0);
-      setIsProcessing(true);
-
-      // 检查钱包连接状态
-      if (!isConnected) {
-        message.error('请先连接钱包');
-        throw new Error('钱包未连接');
-      }
-      
-      // 连接到以太坊网络
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      // 合约地址（已在组件顶部全局配置）
-      const contract = new ethers.Contract(contractAddress, OracleABI, signer);
-
-      // 获取表单数据
-      const { projectId, dataDate } = values;
-      
-      // 计算DID
-      const dataDateStr = dayjs.isDayjs(dataDate) ? dataDate.format('YYYY-MM-DD') : dataDate;
-      const [year, month, day] = dataDateStr.split('-');
-      const did = ethers.keccak256(ethers.toUtf8Bytes(`${year}${month}${day}`));
-
-      // 执行合约调用
-      const dataHash = await contract.getDataHash(
-        ethers.encodeBytes32String(projectId), // 统一使用encodeBytes32String转换
-        did
-      );
-
-      message.destroy();
-      message.success('数据哈希获取成功！');
-      
-      setDataHashResult(dataHash);
-    } catch (error) {
-      console.error('获取数据哈希失败:', error);
-      message.destroy();
-      message.error('获取数据哈希失败：' + simplifyError(error));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   // Oracle操作：添加授权人
   const handleAddAuthorizer = async (values) => {
@@ -1425,6 +1381,8 @@ const FileUploadForm = () => {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), 30000); // 30秒超时
 
+    // 清空年月范围查询结果
+    setDataIdsByYearMonthResult([]);
     setPendingQuery({ dataDate, projectId });
     setIsQuerying(true);
     message.loading('正在查询数据...', 0);
@@ -1451,10 +1409,27 @@ const FileUploadForm = () => {
       message.destroy();
       message.success('数据查询成功！');
 
+      // 确保coreData被转换为正确的格式（Uint8Array或十六进制字符串）
+      let coreData;
+      if (typeof data.coreData === 'string') {
+        // 如果已经是字符串，直接使用
+        coreData = data.coreData;
+      } else if (data.coreData?.toHexString) {
+        // 如果是ethers.js的Bytes对象，转换为十六进制字符串
+        coreData = data.coreData.toHexString();
+      } else if (data.coreData instanceof Uint8Array) {
+        // 如果已经是Uint8Array，直接使用
+        coreData = data.coreData;
+      } else {
+        // 其他情况，尝试转换为十六进制字符串
+        coreData = JSON.stringify(data.coreData);
+        console.error(`不支持的coreData类型: ${typeof data.coreData}`);
+      }
+
       setDataResult({
         pid: data.pid,
         did: data.did,
-        coreData: data.coreData,
+        coreData: coreData,
         dataHash: data.dataHash,
         submitter: data.submitter,
         submitTime: new Date(Number(data.submitTime) * 1000).toISOString()
@@ -1481,6 +1456,161 @@ const FileUploadForm = () => {
   const handleBackToProjects = () => {
     setActiveView('projects');
     setSelectedProject(null);
+  };
+
+
+  // 按钮处理器：获取所有数据ID和所有数据
+  const handleGetAllDataIdsAndData = async () => {
+    if (!selectedProject) {
+      message.error('请先选择项目');
+      return;
+    }
+    if (!isConnected) {
+      message.error('请先连接钱包');
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      await fetchAllDataIdsAndData();
+      message.success('全部数据查询成功');
+    } catch (error) {
+      message.error('查询失败：' + simplifyError(error));
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 按年月获取完整数据列表
+  const fetchDataByYearMonth = async (year, month) => {
+    if (!selectedProject || !isConnected) {
+      return [];
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const contract = new ethers.Contract(contractAddress, OracleABI, provider);
+      const projectId = ethers.encodeBytes32String(selectedProject.pid);
+
+      const dataIds = await contract.getDataIdsByYearMonth(projectId, year, month);
+      
+      // 获取每个数据ID对应的完整数据
+      const dataList = await Promise.all(dataIds.map(async (dataId) => {
+        try {
+          const data = await contract.getData(projectId, dataId);
+          
+          // 确保coreData被转换为正确的格式（Uint8Array或十六进制字符串）
+          let coreData;
+          console.log('原始coreData类型:', typeof data.coreData);
+          console.log('原始coreData:', data.coreData);
+          
+          if (data.coreData === null || data.coreData === undefined) {
+            // 如果是null或undefined，使用空字符串
+            console.log('coreData是null或undefined，使用空字符串');
+            coreData = '';
+          } else if (typeof data.coreData === 'string') {
+            // 如果已经是字符串，直接使用
+            console.log('coreData是字符串，直接使用');
+            coreData = data.coreData;
+          } else if (data.coreData?.toHexString) {
+            // 如果是ethers.js的Bytes对象，转换为十六进制字符串
+            console.log('coreData是ethers.js Bytes对象，转换为十六进制字符串');
+            coreData = data.coreData.toHexString();
+            console.log('转换后的coreData:', coreData);
+          } else if (data.coreData instanceof Uint8Array) {
+            // 如果已经是Uint8Array，直接使用
+            console.log('coreData是Uint8Array，直接使用');
+            coreData = data.coreData;
+          } else {
+            // 其他情况，尝试转换为十六进制字符串
+            console.error(`不支持的coreData类型: ${typeof data.coreData}`);
+            coreData = JSON.stringify(data.coreData);
+          }
+          
+          return {
+            pid: data.pid,
+            coreData: coreData,
+            dataHash: data.dataHash,
+            submitter: data.submitter,
+            submitTime: new Date(Number(data.submitTime) * 1000).toISOString(),
+            did: dataId,
+            originalDid: dataId
+          };
+        } catch (error) {
+          console.error(`获取数据ID ${dataId} 的完整数据失败:`, error);
+          return null;
+        }
+      }));
+      
+      // 过滤掉获取失败的数据
+      return dataList.filter(Boolean);
+    } catch (error) {
+      console.error('按年月获取数据失败:', error);
+      throw error;
+    }
+  };
+
+  // 按钮处理器：按年月范围查询
+  const handleGetDataByYearMonthRange = async () => {
+    if (!startYearMonth || !endYearMonth) {
+      message.warning('请选择开始年月和结束年月');
+      return;
+    }
+    
+    const startDateStr = startYearMonth.format('YYYY-MM');
+    const endDateStr = endYearMonth.format('YYYY-MM');
+    
+    const [startYear, startMonth] = startDateStr.split('-').map(Number);
+    const [endYear, endMonth] = endDateStr.split('-').map(Number);
+    
+    if (!selectedProject) {
+      message.error('请先选择项目');
+      return;
+    }
+    
+    if (!isConnected) {
+      message.error('请先连接钱包');
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      // 清空日期查询结果和当前页码
+      setDataResult(null);
+      setCurrentPage(1);
+      
+      // 遍历开始年月到结束年月之间的所有年月
+      const dataByMonth = {};
+      let totalDataCount = 0;
+      let currentYear = startYear;
+      let currentMonth = startMonth;
+      
+      while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
+        const monthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+        const dataList = await fetchDataByYearMonth(currentYear, currentMonth);
+        
+        if (dataList.length > 0) {
+          dataByMonth[monthKey] = dataList;
+          totalDataCount += dataList.length;
+        }
+        
+        // 移动到下一个月
+        currentMonth++;
+        if (currentMonth > 12) {
+          currentMonth = 1;
+          currentYear++;
+        }
+      }
+      
+      // 更新数据ID列表和完整数据结果
+      setDataIdsByYearMonthResult(Object.values(dataByMonth).flat().map(data => data.did));
+      setDataByYearMonthResult(dataByMonth);
+      
+      message.success(`查询成功，共找到 ${totalDataCount} 条数据，分布在 ${Object.keys(dataByMonth).length} 个月份中`);
+    } catch (error) {
+      message.error('查询失败：' + simplifyError(error));
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // 响应式容器样式
@@ -1626,83 +1756,85 @@ const FileUploadForm = () => {
           style={cardStyle}
           size={isMobile ? 'small' : 'default'}
         >
-          {isMobile ? (
-            <div>
-              {projectList.map(project => (
-                <Card
-                  key={project.pid}
-                  size="small"
-                  style={{ marginBottom: 12, borderRadius: 8 }}
-                  bodyStyle={{ padding: 12 }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                    <div>
-                      <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{project.pid}</span>
-                      <Tag color={project.isActive ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-                        {project.isActive ? '激活' : '禁用'}
-                      </Tag>
+          <div>
+            {isMobile ? (
+              <div>
+                {projectList.map(project => (
+                  <Card
+                    key={project.pid}
+                    size="small"
+                    style={{ marginBottom: 12, borderRadius: 8 }}
+                    bodyStyle={{ padding: 12 }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div>
+                        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{project.pid}</span>
+                        <Tag color={project.isActive ? 'green' : 'red'} style={{ marginLeft: 8 }}>
+                          {project.isActive ? '激活' : '禁用'}
+                        </Tag>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => handleProjectUpload(project)}
+                          style={{ padding: '0 4px' }}
+                        >
+                          上传
+                        </Button>
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => handleProjectQuery(project)}
+                          style={{ padding: '0 4px' }}
+                        >
+                          查询
+                        </Button>
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => handleAddAuthorizerForProject(project)}
+                          style={{ padding: '0 4px' }}
+                        >
+                          授权
+                        </Button>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => handleProjectUpload(project)}
-                        style={{ padding: '0 4px' }}
-                      >
-                        上传
-                      </Button>
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => handleProjectQuery(project)}
-                        style={{ padding: '0 4px' }}
-                      >
-                        查询
-                      </Button>
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => handleAddAuthorizerForProject(project)}
-                        style={{ padding: '0 4px' }}
-                      >
-                        授权
-                      </Button>
+                    <div style={{ fontSize: '13px', color: '#666', marginBottom: 4 }}>
+                      <span style={{ fontWeight: 500 }}>描述:</span> {project.description || '-'}
                     </div>
+                    <div style={{ fontSize: '13px', color: '#666' }}>
+                      <span style={{ fontWeight: 500 }}>有效期:</span> {
+                        project.dataTTL < 60 ? `${project.dataTTL}秒` :
+                        project.dataTTL < 3600 ? `${Math.floor(project.dataTTL / 60)}分钟` :
+                        project.dataTTL < 86400 ? `${Math.floor(project.dataTTL / 3600)}小时` :
+                        `${Math.floor(project.dataTTL / 86400)}天`
+                      }
+                    </div>
+                  </Card>
+                ))}
+                {projectList.length === 0 && !isLoadingProjects && (
+                  <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
+                    暂无项目数据
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 500 }}>描述:</span> {project.description || '-'}
+                )}
+                {isLoadingProjects && (
+                  <div style={{ textAlign: 'center', padding: 20 }}>
+                    <Spin tip="加载中..." />
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666' }}>
-                    <span style={{ fontWeight: 500 }}>有效期:</span> {
-                      project.dataTTL < 60 ? `${project.dataTTL}秒` :
-                      project.dataTTL < 3600 ? `${Math.floor(project.dataTTL / 60)}分钟` :
-                      project.dataTTL < 86400 ? `${Math.floor(project.dataTTL / 3600)}小时` :
-                      `${Math.floor(project.dataTTL / 86400)}天`
-                    }
-                  </div>
-                </Card>
-              ))}
-              {projectList.length === 0 && !isLoadingProjects && (
-                <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
-                  暂无项目数据
-                </div>
-              )}
-              {isLoadingProjects && (
-                <div style={{ textAlign: 'center', padding: 20 }}>
-                  <Spin tip="加载中..." />
-                </div>
-              )}
-            </div>
-          ) : (
-            <Table
-              columns={projectColumns}
-              dataSource={projectList}
-              rowKey="pid"
-              loading={isLoadingProjects}
-              pagination={{ pageSize: 10 }}
-              size="middle"
-            />
-          )}
+                )}
+              </div>
+            ) : (
+              <Table
+                columns={projectColumns}
+                dataSource={projectList}
+                rowKey="pid"
+                loading={isLoadingProjects}
+                pagination={{ pageSize: 10 }}
+                size="middle"
+              />
+            )}
+          </div>
         </Card>
       )}
       
@@ -1726,9 +1858,9 @@ const FileUploadForm = () => {
             }}
             size={isMobile ? 'small' : 'large'}
           >
-            {/* 项目信息 */}
-            <Card title="项目信息" style={cardStyle} size={isMobile ? 'small' : 'default'}>
-              <Form.Item
+            {/* 数据上传 */}
+            <Card title="数据上传" style={cardStyle} size={isMobile ? 'small' : 'default'}>
+              {/* <Form.Item
                 name="projectId"
                 label="项目ID"
                 rules={[{ required: true, message: '请选择项目ID' }]}
@@ -1756,7 +1888,7 @@ const FileUploadForm = () => {
                     ))}
                   </Select>
                 )}
-              </Form.Item>
+              </Form.Item> */}
               
               <Form.Item
                 name="dataDate"
@@ -1785,6 +1917,7 @@ const FileUploadForm = () => {
                   <div>
                     {fields.map((field, index) => (
                       <div key={`core-data-field-${field.fieldKey}`} style={{ display: 'flex', alignItems: 'center', marginBottom: isMobile ? 4 : 8 }}>
+                        <span style={{ color: '#ff4d4f', marginRight: 4, fontSize: isMobile ? '12px' : '14px' }}>*</span>
                         <Form.Item
                           name={[field.name, 'key']}
                           fieldKey={[field.fieldKey, 'key']}
@@ -1796,6 +1929,7 @@ const FileUploadForm = () => {
                             size={isMobile ? 'small' : 'middle'}
                           />
                         </Form.Item>
+                        <span style={{ color: '#ff4d4f', marginRight: 4, fontSize: isMobile ? '12px' : '14px' }}>*</span>
                         <Form.Item
                           name={[field.name, 'value']}
                           fieldKey={[field.fieldKey, 'value']}
@@ -2071,27 +2205,13 @@ const FileUploadForm = () => {
           
           {/* 显示当前选择的项目信息 */}
           {selectedProject && (
-            <Card title="当前项目" style={cardStyle} size={isMobile ? 'small' : 'default'}>
+            <Card title="数据查询" style={cardStyle} size={isMobile ? 'small' : 'default'}>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 8 }}><strong>项目ID:</strong> {selectedProject.pid}</p>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 8 }}><strong>描述:</strong> {selectedProject.description}</p>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 8 }}><strong>有效期:</strong> {selectedProject.dataTTL}秒</p>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>状态:</strong> <Tag color={selectedProject.isActive ? 'green' : 'red'} style={{ marginLeft: 4 }}>{selectedProject.isActive ? '激活' : '禁用'}</Tag></p>
             </Card>
           )}
-          
-          {/* 日期选择器 */}
-          <Card title="选择日期" style={cardStyle} size={isMobile ? 'small' : 'default'}>
-            <Button 
-              type="primary" 
-              icon={<SearchOutlined />} 
-              onClick={() => setIsDatePickerModalVisible(true)}
-              loading={isQuerying}
-              block={isMobile}
-              size={isMobile ? 'small' : 'middle'}
-            >
-              选择日期查询
-            </Button>
-          </Card>
           
           {/* 日期选择器模态框 */}
           <Modal
@@ -2136,30 +2256,41 @@ const FileUploadForm = () => {
           </Modal>
           
           {/* 数据查询结果 */}
-          {dataResult && (
-            <Card title="查询结果" style={cardStyle} size={isMobile ? 'small' : 'default'}>
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>项目ID:</strong> {
+          {/* 高级查询功能 - 页签式界面 */}
+          {selectedProject && (
+            <Card title="" style={cardStyle} size={isMobile ? 'small' : 'default'}>
+              <Tabs
+                activeKey={activeQueryTab}
+                onChange={setActiveQueryTab}
+                type={isMobile ? 'line' : 'card'}
+                size={isMobile ? 'small' : 'middle'}
+                items={[
+                  {
+                    key: 'latest',
+                    label: (
+                      <span>
+                        <DatabaseOutlined />
+                        {isMobile ? '' : '最新数据'}
+                      </span>
+                    ),
+                    children: (
+                      <div style={{ padding: isMobile ? '8px 0' : '16px 0' }}>
+          {/* 最新数据查询结果 - 只在最新数据页签显示 */}
+          {activeQueryTab === 'latest' && latestDataResult && (
+            <Card title="" style={cardStyle} size={isMobile ? 'small' : 'default'}>
+              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>DataID:</strong> {
                 (() => {
                   try {
-                    return ethers.decodeBytes32String(dataResult.pid);
+                    return ethers.decodeBytes32String(latestDataResult.did);
                   } catch {
-                    return dataResult.pid;
-                  }
-                })()
-              }</p>
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>Data ID:</strong> {
-                (() => {
-                  try {
-                    return ethers.decodeBytes32String(dataResult.did);
-                  } catch {
-                    return dataResult.did;
+                    return latestDataResult.did;
                   }
                 })()
               }</p>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 8 }}><strong>核心数据:</strong></p>
               {(() => {
                 try {
-                  const parsedCoreData = DataSerializer.deserialize(dataResult.coreData);
+                  const parsedCoreData = DataSerializer.deserialize(latestDataResult.coreData);
                   const entries = Object.entries(parsedCoreData);
                   if (entries.length === 0) {
                     return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#999' }}>无数据</p>;
@@ -2178,11 +2309,200 @@ const FileUploadForm = () => {
                   return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#ff4d4f' }}>解析失败: {simplifyError(error)}</p>;
                 }
               })()}
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all' }}>{dataResult.dataHash}</span></p>
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>提交者:</strong> {dataResult.submitter}</p>
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>时间:</strong> {new Date(dataResult.submitTime).toLocaleString()}</p>
+              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all' }}>{latestDataResult.dataHash}</span></p>
+              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>提交者:</strong> {latestDataResult.submitter}</p>
+              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>提交时间:</strong> {new Date(latestDataResult.submitTime).toLocaleString()}</p>
             </Card>
           )}
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'historical',
+                    label: (
+                      <span>
+                        <DatabaseOutlined />
+                        {isMobile ? '' : '历史数据'}
+                      </span>
+                    ),
+                    children: (
+                      <div style={{ padding: isMobile ? '8px 0' : '16px 0' }}>
+                        {/* 历史数据页签内容 */}
+                        <div style={{ marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                          {/* 按日期查询 */}
+                          <div style={{ flex: '1 1 auto' }}>
+                            <div style={{ marginBottom: 12, fontWeight: 'bold', fontSize: isMobile ? '14px' : '16px' }}>按日期查询</div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <Button 
+                                type="primary" 
+                                icon={<SearchOutlined />} 
+                                onClick={() => setIsDatePickerModalVisible(true)}
+                                loading={isQuerying}
+                                size={isMobile ? 'small' : 'middle'}
+                              >
+                                选择日期查询
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          {/* 按年月范围查询（放在右边） */}
+                          <div style={{ flex: '1 1 auto' }}>
+                            <div style={{ marginBottom: 12, fontWeight: 'bold', fontSize: isMobile ? '14px' : '16px' }}>按年月范围查询</div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <DatePicker
+                                picker="month"
+                                placeholder="开始年月"
+                                style={{ width: isMobile ? '100%' : 180 }}
+                                size={isMobile ? 'small' : 'middle'}
+                                value={startYearMonth}
+                                onChange={(date) => setStartYearMonth(date)}
+                              />
+                              <DatePicker
+                                picker="month"
+                                placeholder="结束年月"
+                                style={{ width: isMobile ? '100%' : 180 }}
+                                size={isMobile ? 'small' : 'middle'}
+                                value={endYearMonth}
+                                onChange={(date) => setEndYearMonth(date)}
+                              />
+                              <Button
+                                type="primary"
+                                onClick={handleGetDataByYearMonthRange}
+                                loading={isProcessing}
+                                size={isMobile ? 'small' : 'middle'}
+                              >
+                                查询
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* 查询结果显示区域 */}
+                        {dataIdsByYearMonthResult.length > 0 && (
+                          <div>
+                            {/* 按月份分组展示数据 */}
+                            {Object.entries(dataByYearMonthResult).map(([monthKey, monthData]) => (
+                              <div key={monthKey} style={{ marginBottom: 24 }}>
+                                <h3 style={{ marginBottom: 16, fontSize: isMobile ? '16px' : '18px', color: '#1890ff' }}>
+                                  {monthKey} 月数据 ({monthData.length} 条)
+                                </h3>
+                                
+                                {/* 数据卡片列表 */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                                  {monthData.map((dataItem) => (
+                                    <Card 
+                                      key={dataItem.did} 
+                                      style={{ 
+                                        width: isMobile ? '100%' : 300, 
+                                        flex: '1 1 300px',
+                                        minWidth: isMobile ? '100%' : 280
+                                      }}
+                                      size={isMobile ? 'small' : 'default'}
+                                    >
+                                      <div style={{ fontSize: isMobile ? '12px' : '14px' }}>
+                                        <p style={{ marginBottom: 4, fontWeight: 'bold' }}>DataID: {(() => {
+                                          try {
+                                            return ethers.decodeBytes32String(dataItem.did);
+                                          } catch {
+                                            return dataItem.did;
+                                          }
+                                        })()}</p>                                 
+                                        <p style={{ marginBottom: 4, fontWeight: 'bold' }}>核心数据:</p>
+                                        <div style={{ marginLeft: 8, marginBottom: 8 }}>
+                                          {(() => {
+                                            try {
+                                              const parsedCoreData = DataSerializer.deserialize(dataItem.coreData);
+                                              const entries = Object.entries(parsedCoreData);
+                                              if (entries.length === 0) {
+                                                return <p style={{ color: '#999' }}>无数据</p>;
+                                              }
+                                              return (
+                                                <div>
+                                                  {entries.map(([key, value]) => (
+                                                    <p key={key} style={{ marginBottom: 2 }}>
+                                                      <span style={{ color: '#1890ff' }}>{key}:</span> {value.toString()}
+                                                    </p>
+                                                  ))}
+                                                </div>
+                                              );
+                                            } catch (error) {
+                                              console.error('解析核心数据失败:', error);
+                                              return <p style={{ color: '#ff4d4f' }}>解析失败: {simplifyError(error)}</p>;
+                                            }
+                                          })()}
+                                        </div>
+                                        
+                                        <p style={{ marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all', fontSize: isMobile ? '10px' : '12px' }}>{dataItem.dataHash}</span></p>
+                                        <p style={{ marginBottom: 4 }}><strong>提交者:</strong> <span style={{ wordBreak: 'break-all', fontSize: isMobile ? '10px' : '12px' }}>{dataItem.submitter}</span></p>
+                                        <p style={{ marginBottom: 8, color: '#666' }}>提交时间: {new Date(dataItem.submitTime).toLocaleString()}</p>
+                                      </div>
+                                    </Card>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* 按日期查询结果 */}
+                        {dataResult && (
+                          <Card 
+                            title="查询结果"
+                            style={cardStyle}
+                            size={isMobile ? 'small' : 'default'}
+                          >
+                            {/* <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>项目ID:</strong> {
+                              (() => {
+                                try {
+                                  return ethers.decodeBytes32String(dataResult.pid);
+                                } catch {
+                                  return dataResult.pid;
+                                }
+                              })()
+                            }</p> */}
+                            <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>DataID:</strong> {
+                              (() => {
+                                try {
+                                  return ethers.decodeBytes32String(dataResult.did);
+                                } catch {
+                                  return dataResult.did;
+                                }
+                              })()
+                            }</p>
+                            <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 8 }}><strong>核心数据:</strong></p>
+                            {(() => {
+                              try {
+                                const parsedCoreData = DataSerializer.deserialize(dataResult.coreData);
+                                const entries = Object.entries(parsedCoreData);
+                                if (entries.length === 0) {
+                                  return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#999' }}>无数据</p>;
+                                }
+                                return (
+                                  <div style={{ marginLeft: isMobile ? 8 : 16, marginBottom: 8 }}>
+                                    {entries.map(([key, value]) => (
+                                      <p key={key} style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 2 }}>
+                                        <span style={{ color: '#1890ff' }}>{key}:</span> {value.toString()}
+                                      </p>
+                                    ))}
+                                  </div>
+                                );
+                              } catch (error) {
+                                console.error('解析核心数据失败:', error);
+                                return <p style={{ fontSize: isMobile ? '12px' : '14px', color: '#ff4d4f' }}>解析失败: {simplifyError(error)}</p>;
+                              }
+                            })()}
+                            <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all' }}>{dataResult.dataHash}</span></p>
+                            <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>提交者:</strong> {dataResult.submitter}</p>
+                            <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>提交时间:</strong> {new Date(dataResult.submitTime).toLocaleString()}</p>
+                          </Card>
+                        )}
+                      </div>
+                    )
+                  }
+                ]}
+              />
+            </Card>
+          )}
+        
         </>
       )}
       

@@ -33,6 +33,52 @@ export const OracleABI = [
 		"type": "error"
 	},
 	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "submitter",
+				"type": "address"
+			}
+		],
+		"name": "addAuthorizedSubmitter",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "pids",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "dids",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bytes[]",
+				"name": "coreDataArray",
+				"type": "bytes[]"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "dataHashes",
+				"type": "bytes32[]"
+			}
+		],
+		"name": "batchSubmitData",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -64,6 +110,24 @@ export const OracleABI = [
 		"type": "event"
 	},
 	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "role",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "account",
+				"type": "address"
+			}
+		],
+		"name": "grantRole",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -87,6 +151,65 @@ export const OracleABI = [
 		],
 		"name": "ProjectRegistered",
 		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "string",
+				"name": "description",
+				"type": "string"
+			},
+			{
+				"internalType": "uint256",
+				"name": "dataTTL",
+				"type": "uint256"
+			}
+		],
+		"name": "registerProject",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "role",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "callerConfirmation",
+				"type": "address"
+			}
+		],
+		"name": "renounceRole",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "role",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "account",
+				"type": "address"
+			}
+		],
+		"name": "revokeRole",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -164,29 +287,31 @@ export const OracleABI = [
 		"type": "event"
 	},
 	{
-		"inputs": [],
-		"name": "DATA_UPLOADER_ROLE",
-		"outputs": [
+		"inputs": [
 			{
 				"internalType": "bytes32",
-				"name": "",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "did",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes",
+				"name": "coreData",
+				"type": "bytes"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "dataHash",
 				"type": "bytes32"
 			}
 		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "DEFAULT_ADMIN_ROLE",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "view",
+		"name": "submitData",
+		"outputs": [],
+		"stateMutability": "nonpayable",
 		"type": "function"
 	},
 	{
@@ -197,42 +322,27 @@ export const OracleABI = [
 				"type": "bytes32"
 			},
 			{
-				"internalType": "address",
-				"name": "submitter",
-				"type": "address"
+				"internalType": "uint256",
+				"name": "dataTTL",
+				"type": "uint256"
 			}
 		],
-		"name": "addAuthorizedSubmitter",
+		"name": "updateProjectConfig",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
 	},
 	{
-		"inputs": [
+		"inputs": [],
+		"name": "DATA_UPLOADER_ROLE",
+		"outputs": [
 			{
-				"internalType": "bytes32[]",
-				"name": "pids",
-				"type": "bytes32[]"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "dids",
-				"type": "bytes32[]"
-			},
-			{
-				"internalType": "bytes[]",
-				"name": "coreDataArray",
-				"type": "bytes[]"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "dataHashes",
-				"type": "bytes32[]"
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
 			}
 		],
-		"name": "batchSubmitData",
-		"outputs": [],
-		"stateMutability": "nonpayable",
+		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -262,6 +372,19 @@ export const OracleABI = [
 			}
 		],
 		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "DEFAULT_ADMIN_ROLE",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -418,6 +541,209 @@ export const OracleABI = [
 				"type": "bytes32"
 			}
 		],
+		"name": "getDataIds",
+		"outputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "dids",
+				"type": "bytes32[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "prefix",
+				"type": "bytes32"
+			}
+		],
+		"name": "getDataIdsByPrefix",
+		"outputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "matchingIds",
+				"type": "bytes32[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint16",
+				"name": "year",
+				"type": "uint16"
+			},
+			{
+				"internalType": "uint8",
+				"name": "month",
+				"type": "uint8"
+			}
+		],
+		"name": "getDataIdsByYearMonth",
+		"outputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "matchingIds",
+				"type": "bytes32[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			}
+		],
+		"name": "getLatestData",
+		"outputs": [
+			{
+				"components": [
+					{
+						"internalType": "bytes32",
+						"name": "pid",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "did",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes",
+						"name": "coreData",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "dataHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "address",
+						"name": "submitter",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "submitTime",
+						"type": "uint256"
+					}
+				],
+				"internalType": "struct IOracle.OracleData",
+				"name": "data",
+				"type": "tuple"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint16",
+				"name": "year",
+				"type": "uint16"
+			},
+			{
+				"internalType": "uint8",
+				"name": "month",
+				"type": "uint8"
+			}
+		],
+		"name": "getLatestDataByYearMonth",
+		"outputs": [
+			{
+				"components": [
+					{
+						"internalType": "bytes32",
+						"name": "pid",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "did",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes",
+						"name": "coreData",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "dataHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "address",
+						"name": "submitter",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "submitTime",
+						"type": "uint256"
+					}
+				],
+				"internalType": "struct IOracle.OracleData",
+				"name": "data",
+				"type": "tuple"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			}
+		],
+		"name": "getLatestDataId",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "did",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "pid",
+				"type": "bytes32"
+			}
+		],
 		"name": "getProjectConfig",
 		"outputs": [
 			{
@@ -502,24 +828,6 @@ export const OracleABI = [
 				"type": "address"
 			}
 		],
-		"name": "grantRole",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "role",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "account",
-				"type": "address"
-			}
-		],
 		"name": "hasRole",
 		"outputs": [
 			{
@@ -577,93 +885,6 @@ export const OracleABI = [
 	{
 		"inputs": [
 			{
-				"internalType": "bytes32",
-				"name": "pid",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "string",
-				"name": "description",
-				"type": "string"
-			},
-			{
-				"internalType": "uint256",
-				"name": "dataTTL",
-				"type": "uint256"
-			}
-		],
-		"name": "registerProject",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "role",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "callerConfirmation",
-				"type": "address"
-			}
-		],
-		"name": "renounceRole",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "role",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "account",
-				"type": "address"
-			}
-		],
-		"name": "revokeRole",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "pid",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "did",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes",
-				"name": "coreData",
-				"type": "bytes"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "dataHash",
-				"type": "bytes32"
-			}
-		],
-		"name": "submitData",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
 				"internalType": "bytes4",
 				"name": "interfaceId",
 				"type": "bytes4"
@@ -678,24 +899,6 @@ export const OracleABI = [
 			}
 		],
 		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "pid",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "uint256",
-				"name": "dataTTL",
-				"type": "uint256"
-			}
-		],
-		"name": "updateProjectConfig",
-		"outputs": [],
-		"stateMutability": "nonpayable",
 		"type": "function"
 	}
 ];

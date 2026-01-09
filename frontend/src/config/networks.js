@@ -70,7 +70,7 @@ export const NETWORK_CONFIGS = {
       decimals: 18
     },
     // rpcUrl: 'https://data-seed-prebsc-1-s3.bnbchain.org:8545',
-    contractAddress: '0x317115662F6598935032409a66D217B38Ca75980'
+    contractAddress: '0xE77EccaF51D66cE185A44d2C3c22fc7F91461A0f'
   }
 };
 
