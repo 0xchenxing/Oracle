@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Input, Form, Upload, message, Steps, Spin, Alert, Tabs, Card, Select, Table, Tag, Calendar, Modal, Tooltip, List, Empty, Divider, DatePicker, Pagination } from 'antd';
-import { UploadOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, DatabaseOutlined, UserOutlined, SettingOutlined, CopyOutlined, TeamOutlined, SafetyCertificateOutlined, CloudUploadOutlined, CalendarOutlined } from '@ant-design/icons';
+import { UploadOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, DatabaseOutlined, UserOutlined, SettingOutlined, CopyOutlined, TeamOutlined, SafetyCertificateOutlined, CloudUploadOutlined, CalendarOutlined, EyeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useMediaQuery } from 'react-responsive';
 import sha256 from 'sha256';
 import axios from 'axios';
@@ -16,11 +16,24 @@ import { NETWORK_CONFIGS, getCurrentContractAddress, isContractConfigured, getFi
 
 const { TextArea } = Input;
 
+// HTML转义函数，用于防止XSS攻击和正确显示特殊字符
+const escapeHtml = (text) => {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
 const simplifyError = (error) => {
   const message = error.message || String(error);
   
   if (message.includes('Data not found') || message.includes('execution reverted')) {
     return '未找到数据，请检查项目ID和日期是否正确';
+  }
+  if (message.includes('Request failed with status code 404')) {
+    return '文件不存在或已被删除';
   }
   if (message.includes('user rejected') || message.includes('User rejected')) {
     return '用户取消操作';
@@ -170,7 +183,7 @@ const FileUploadForm = () => {
   const [projectOwnerResult, setProjectOwnerResult] = useState(null);
   const [projectList, setProjectList] = useState([]); // 新增：项目列表状态
   const [isLoadingProjects, setIsLoadingProjects] = useState(false); // 新增：加载状态
-  const [isContractOwner, setIsContractOwner] = useState(false); // 是否为合约所有者
+
   const [contractOwner, setContractOwner] = useState(''); // 合约所有者地址
   const [selectedProject, setSelectedProject] = useState(null); // 当前选中的项目
   const [activeView, setActiveView] = useState('projects'); // 当前激活的视图：projects, upload, query, register, addAuthorizer, roleManagement
@@ -198,18 +211,18 @@ const FileUploadForm = () => {
   const [revokeRoleLoading, setRevokeRoleLoading] = useState(false); // 撤销角色加载状态
   const [roleForm] = Form.useForm(); // 角色管理表单实例
 
+  // 权限状态
+  const [isAdmin, setIsAdmin] = useState(false); // 是否为管理员
+  const [isDataUploader, setIsDataUploader] = useState(false); // 是否为数据上传者
+  const [hasRegisterPermission, setHasRegisterPermission] = useState(false); // 是否有项目注册权限
+  const [hasRoleManagementPermission, setHasRoleManagementPermission] = useState(false); // 是否有角色管理权限
+  const [permissionLoading, setPermissionLoading] = useState(true); // 权限加载状态
+
   // 自动获取当前日期
   useEffect(() => {
     const today = new Date();
     form.setFieldsValue({ dataDate: dayjs(today) });
   }, [form]);
-
-  // 获取合约所有者
-  useEffect(() => {
-    if (isConnected) {
-      fetchContractOwner();
-    }
-  }, [isConnected]);
 
   // 组件初始化完成后，检查所有配置条件，确保项目列表能够及时加载
   // 监听ProjectRegistered事件获取项目列表并过滤授权项目
@@ -219,19 +232,51 @@ const FileUploadForm = () => {
     }
   }, [isConnected, contractAddress, currentChainId, address]);
 
-  // 获取合约所有者
-  const fetchContractOwner = async () => {
+  // 检查用户权限
+  const checkUserPermissions = async () => {
+    if (!isConnected || !contractAddress) {
+      setPermissionLoading(false);
+      return;
+    }
+
     try {
+      setPermissionLoading(true);
       const provider = new ethers.BrowserProvider(window.ethereum);
       const contract = new ethers.Contract(contractAddress, OracleABI, provider);
-      
-      const owner = await contract.owner();
-      setContractOwner(owner);
-      setIsContractOwner(owner.toLowerCase() === address.toLowerCase());
+
+      // 获取角色
+      const DEFAULT_ADMIN_ROLE = await contract.DEFAULT_ADMIN_ROLE();
+      const DATA_UPLOADER_ROLE = await contract.DATA_UPLOADER_ROLE();
+
+      // 检查权限
+      const admin = await contract.hasRole(DEFAULT_ADMIN_ROLE, address);
+      const dataUploader = await contract.hasRole(DATA_UPLOADER_ROLE, address);
+
+      // 更新权限状态
+      setIsAdmin(admin);
+      setIsDataUploader(dataUploader);
+      setHasRegisterPermission(admin || dataUploader);
+      setHasRoleManagementPermission(admin);
     } catch (error) {
-      console.error('获取合约所有者失败:', error);
+      console.error('检查权限失败:', error);
+    } finally {
+      setPermissionLoading(false);
     }
   };
+
+  // 自动检查权限
+  useEffect(() => {
+    if (isConnected && contractAddress) {
+      checkUserPermissions();
+    } else {
+      // 如果未连接钱包或没有合约地址，重置权限状态
+      setIsAdmin(false);
+      setIsDataUploader(false);
+      setHasRegisterPermission(false);
+      setHasRoleManagementPermission(false);
+      setPermissionLoading(false);
+    }
+  }, [isConnected, contractAddress, address]);
 
   // 自动查询最新数据当项目被选择或切换到最新数据页签
   useEffect(() => {
@@ -247,18 +292,26 @@ const FileUploadForm = () => {
     }
   }, [selectedProject, isConnected, activeView, activeQueryTab]);
 
-  // 历史数据页签不再自动查询数据，改为点击查询按钮后手动查询
-  // useEffect(() => {
-  //   if (selectedProject && isConnected && activeView === 'query' && activeQueryTab === 'historical') {
-  //     handleGetAllDataIdsAndData();
-  //   }
-  // }, [selectedProject, isConnected, activeView, activeQueryTab]);
-
-  // 切换页签时只清空最新数据结果，保留历史数据查询结果
+  // 切换页签时处理
   useEffect(() => {
-    // 当切换到历史数据页签时，不清空历史数据结果
+    // 当切换到历史数据页签时，设置默认查询当月数据
+    if (activeQueryTab === 'historical' && selectedProject && isConnected && activeView === 'query') {
+      const currentDate = dayjs();
+      setStartYearMonth(currentDate);
+      setEndYearMonth(currentDate);
+      // 直接将currentDate传递给查询函数，确保使用最新日期，避免依赖异步状态更新
+      handleGetDataByYearMonthRange(currentDate, currentDate);
+    }
     // 当切换到最新数据页签时，确保最新数据会自动刷新
-  }, [activeQueryTab]);
+  }, [activeQueryTab, selectedProject, isConnected, activeView]);
+
+  // 移除监听日期变化的useEffect钩子，避免重复查询
+  // useEffect(() => {
+  //   // 只有当切换到历史数据页签且日期范围已设置时才自动执行查询
+  //   if (activeQueryTab === 'historical' && selectedProject && isConnected && activeView === 'query' && startYearMonth && endYearMonth) {
+  //     handleGetDataByYearMonthRange();
+  //   }
+  // }, [startYearMonth, endYearMonth, activeQueryTab, selectedProject, isConnected, activeView]);
 
   // 获取项目列表并过滤授权项目
   const fetchProjectList = async () => {
@@ -340,13 +393,22 @@ const FileUploadForm = () => {
             }
           }
           
+          // 检查当前用户是否是该项目的授权人
+          let isUserAuthorizedSubmitter = false;
+          try {
+            // 调用合约的isAuthorizedSubmitter函数检查权限
+            isUserAuthorizedSubmitter = await contract.isAuthorizedSubmitter(pidBytes32, address);
+          } catch (error) {
+            console.error(`[fetchProjectList] 检查项目 ${pidBytes32} 授权状态失败:`, error);
+          }
+
           return {
             pid: ethers.toUtf8String(pidBytes32).slice(0, 4),
             originalPid: pidBytes32, // 保存原始的bytes32类型的pid
-
             description: description, // 从getProjectConfig获取描述
             dataTTL: Number(config.dataTTL),
-            isActive: config.isActive
+            isActive: config.isActive,
+            isUserAuthorizedSubmitter: isUserAuthorizedSubmitter // 当前用户是否是该项目的授权人
           };
         } catch (error) {
           console.error(`[fetchProjectList] 获取项目 ${pidBytes32} 信息失败:`, error);
@@ -432,6 +494,13 @@ const FileUploadForm = () => {
     }
   };
 
+  /**
+   * 获取选定项目的最新数据和数据ID
+   * 
+   * @description 调用合约的getLatestData和getLatestDataId函数，获取选定项目的最新数据和数据ID
+   * @throws {Error} 当未选择项目或项目没有originalPid时抛出错误
+   * @returns {Promise<void>} 无返回值，通过setLatestDataResult更新状态
+   */
   const fetchLatestDataAndId = async () => {
     if (!selectedProject || !selectedProject.originalPid) {
       throw new Error('未选择项目');
@@ -474,6 +543,13 @@ const FileUploadForm = () => {
     setLatestDataResult(latestData);
   };
 
+  /**
+   * 获取选定项目的所有数据ID并获取最新数据
+   * 
+   * @description 调用合约的getDataIds函数获取选定项目的所有数据ID，然后获取最新数据ID对应的具体数据
+   * @throws {Error} 当未选择项目或项目没有originalPid时抛出错误
+   * @returns {Promise<void>} 无返回值，通过setDataIdsResult和setLatestDataResult更新状态
+   */
   const fetchAllDataIdsAndData = async () => {
     if (!selectedProject || !selectedProject.originalPid) {
       throw new Error('未选择项目');
@@ -823,6 +899,48 @@ const FileUploadForm = () => {
   // 一键上传数据主流程
   const handleUpload = async () => {
     try {
+      // 检查钱包连接状态
+      if (!isConnected) {
+        message.error('请先连接钱包');
+        return;
+      }
+      
+      // 创建以太坊提供者实例
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // 获取表单数据，包括项目ID
+      const projectId = form.getFieldValue('projectId');
+      if (!projectId) {
+        message.error('请先选择项目');
+        return;
+      }
+      
+      // 获取当前选中的项目
+      const selectedProject = projectList.find(p => p.pid === projectId);
+      if (!selectedProject) {
+        message.error('未找到选中的项目');
+        return;
+      }
+      
+      // 检查是否有权限上传数据（调用合约的isAuthorizedSubmitter函数）
+      message.loading('正在检查权限...', 0);
+      const contract = new ethers.Contract(contractAddress, OracleABI, provider);
+      
+      // 调用合约的isAuthorizedSubmitter函数，需要bytes32格式的项目ID和当前用户地址
+      const hasUploadPermission = await contract.isAuthorizedSubmitter(selectedProject.originalPid, address);
+      message.destroy();
+      
+      if (!hasUploadPermission) {
+        Modal.error({
+          title: '无权限上传',
+          content: '您没有数据上传权限，请联系管理员获取授权',
+          onOk() {
+            // 可以添加跳转到角色管理页面或其他操作
+          }
+        });
+        return;
+      }
+      
       // 表单验证
       await form.validateFields();
       
@@ -854,7 +972,6 @@ const FileUploadForm = () => {
       message.info('正在生成签名数据...');
       
       // 获取所有需要签名的数据
-      const projectId = form.getFieldValue('projectId');
       const dataDate = form.getFieldValue('dataDate');
       
       // 构建待签名消息
@@ -883,7 +1000,6 @@ const FileUploadForm = () => {
       
       // 3. 使用钱包签名
       message.info('请确认钱包签名...');
-      const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const signature = await signer.signMessage(signatureMessage);
       
@@ -895,7 +1011,6 @@ const FileUploadForm = () => {
       });
       
       // 获取当前选中的项目ID和项目描述
-      const selectedProject = projectList.find(p => p.pid === projectId);
       const projectDescription = selectedProject ? selectedProject.description : '';
       
       formData.append('projectId', projectId);
@@ -907,6 +1022,13 @@ const FileUploadForm = () => {
       // 添加签名数据
       formData.append('signatureData', signatureMessage);
       formData.append('signature', signature);
+      
+      // 添加当前链ID
+      if (currentChainId) {
+        formData.append('chainId', currentChainId);
+      } else {
+        console.warn('当前链ID未获取到，未添加到上传请求中');
+      }
       
       await axios.post('/api/upload', formData, {
         headers: {
@@ -1131,13 +1253,37 @@ const FileUploadForm = () => {
         message.error('请先连接钱包');
         throw new Error('钱包未连接');
       }
-
+      
       // 连接到以太坊网络
       const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // 获取签署者
       const signer = await provider.getSigner();
       
-      // 合约地址（已在组件顶部全局配置）
+      // 创建合约实例
       const contract = new ethers.Contract(contractAddress, OracleABI, signer);
+      
+      // 获取DEFAULT_ADMIN_ROLE和DATA_UPLOADER_ROLE
+      const DEFAULT_ADMIN_ROLE = await contract.DEFAULT_ADMIN_ROLE();
+      const DATA_UPLOADER_ROLE = await contract.DATA_UPLOADER_ROLE();
+      
+      // 检查用户是否拥有管理员角色或数据上传者角色
+      const isAdmin = await contract.hasRole(DEFAULT_ADMIN_ROLE, address);
+      const isDataUploader = await contract.hasRole(DATA_UPLOADER_ROLE, address);
+      
+      const hasRegisterPermission = isAdmin || isDataUploader;
+      if (!hasRegisterPermission) {
+        message.destroy();
+        Modal.error({
+          title: '无权限注册',
+          content: '您没有项目注册权限，请联系管理员获取授权',
+          onOk() {
+            // 可以添加跳转到角色管理页面或其他操作
+          }
+        });
+        setIsProcessing(false);
+        return;
+      }
 
       // 获取表单数据
       const { projectId, description, dataTTLValue, dataTTLUnit } = values;
@@ -1210,7 +1356,7 @@ const FileUploadForm = () => {
     try {
       message.loading('正在添加授权人...', 0);
       setIsProcessing(true);
-  
+
       // 检查钱包连接状态
       if (!isConnected) {
         message.error('请先连接钱包');
@@ -1219,10 +1365,38 @@ const FileUploadForm = () => {
       
       // 连接到以太坊网络
       const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // 获取签署者
       const signer = await provider.getSigner();
       
-      // 合约地址（已在组件顶部全局配置）
+      // 创建合约实例
       const contract = new ethers.Contract(contractAddress, OracleABI, signer);
+      
+      // 获取用户选择的项目ID
+      const { projectId } = values;
+      if (!projectId) {
+        message.error('请先选择项目');
+        setIsProcessing(false);
+        return;
+      }
+      
+      // 将项目ID转换为bytes32格式
+      const pidBytes32 = ethers.encodeBytes32String(projectId);
+      
+      // 只检查用户是否是该项目的授权提交者
+      const hasAddAuthorizerPermission = await contract.isAuthorizedSubmitter(pidBytes32, address);
+      if (!hasAddAuthorizerPermission) {
+        message.destroy();
+        Modal.error({
+          title: '无权限添加授权人',
+          content: '您没有添加授权人权限，请联系管理员获取授权',
+          onOk() {
+            // 可以添加跳转到角色管理页面或其他操作
+          }
+        });
+        setIsProcessing(false);
+        return;
+      }
   
       // 执行合约调用
       const tx = await contract.addAuthorizedSubmitter(
@@ -1292,15 +1466,21 @@ const FileUploadForm = () => {
     {
       title: '数据上传',
       key: 'upload',
-      render: (_, record) => (
-        <Button 
-          type="link" 
-          onClick={() => handleProjectUpload(record)} 
-          icon={<UploadOutlined />}
-        >
-          上传
-        </Button>
-      ),
+      render: (_, record) => {
+        // 管理员、数据上传者或项目授权人可以上传数据
+        const canUpload = record.isUserAuthorizedSubmitter;
+        return (
+          <Button 
+            type="link" 
+            onClick={() => handleProjectUpload(record)} 
+            icon={<UploadOutlined />}
+            disabled={!canUpload}
+            loading={permissionLoading}
+          >
+            上传
+          </Button>
+        );
+      },
     },
     {
       title: '数据查询',
@@ -1318,15 +1498,21 @@ const FileUploadForm = () => {
     {
       title: '添加授权人',
       key: 'addAuthorizer',
-      render: (_, record) => (
-        <Button 
-          type="link" 
-          onClick={() => handleAddAuthorizerForProject(record)}
-          icon={<UserOutlined />}
-        >
-          授权
-        </Button>
-      ),
+      render: (_, record) => {
+        // 管理员、数据上传者或项目授权人可以添加授权人
+        const canAddAuthorizer = record.isUserAuthorizedSubmitter;
+        return (
+          <Button 
+            type="link" 
+            onClick={() => handleAddAuthorizerForProject(record)}
+            icon={<UserOutlined />}
+            disabled={!canAddAuthorizer}
+            loading={permissionLoading}
+          >
+            授权
+          </Button>
+        );
+      },
     },
   ];
 
@@ -1491,7 +1677,20 @@ const FileUploadForm = () => {
       const contract = new ethers.Contract(contractAddress, OracleABI, provider);
       const projectId = ethers.encodeBytes32String(selectedProject.pid);
 
-      const dataIds = await contract.getDataIdsByYearMonth(projectId, year, month);
+      // 获取指定年月的数据ID列表，增加错误处理
+      let dataIds;
+      try {
+        dataIds = await contract.getDataIdsByYearMonth(projectId, year, month);
+        console.log(`获取 ${year}-${month} 月份的数据ID列表成功:`, dataIds);
+        
+        // 确保dataIds是数组
+        if (!Array.isArray(dataIds)) {
+          dataIds = [];
+        }
+      } catch (error) {
+        console.error(`获取 ${year}-${month} 月份的数据ID列表失败:`, error);
+        dataIds = [];
+      }
       
       // 获取每个数据ID对应的完整数据
       const dataList = await Promise.all(dataIds.map(async (dataId) => {
@@ -1549,15 +1748,243 @@ const FileUploadForm = () => {
     }
   };
 
+  // 文件预览处理函数
+  const handlePreviewFile = async (fileHash) => {
+    try {
+      // 构建文件访问URL
+      const fileUrl = `/attach/${fileHash}`;
+      
+      // 发送GET请求获取文件
+      const response = await axios.get(fileUrl, {
+        responseType: 'blob'
+      });
+      
+      // 从响应头获取文件类型
+      const contentType = response.headers['content-type'] || 'application/octet-stream';
+      console.log('文件类型:', contentType);
+      
+      // 创建具有正确MIME类型的Blob
+      const blob = new Blob([response.data], { type: contentType });
+      
+      // 文本文件使用Modal预览，避免弹出窗口问题
+      if (contentType.startsWith('text/')) {
+        // 显示加载状态
+        message.loading('正在读取文件内容...', 0);
+        
+        try {
+          // 使用FileReader明确指定UTF-8编码读取文件
+          const textContent = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsText(blob, 'utf-8');
+          });
+          
+          message.destroy();
+          
+          // 使用Modal组件在当前页面内预览
+          Modal.info({
+            title: '文件预览',
+            width: '80%',
+            content: (
+              <div style={{ 
+                maxHeight: '600px', 
+                overflow: 'auto',
+                padding: '10px',
+                backgroundColor: '#f5f5f5',
+                fontFamily: 'Courier New, monospace',
+                whiteSpace: 'pre-wrap',
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}>
+                <pre>{escapeHtml(textContent)}</pre>
+              </div>
+            )
+          });
+        } catch (readError) {
+          message.destroy();
+          console.error('文件读取失败:', readError);
+          message.error('文件预览失败：无法读取文件内容');
+        }
+      } else if (contentType.startsWith('image/')) {
+        // 图片文件，使用Modal和img标签预览
+        message.destroy();
+        
+        const blobUrl = window.URL.createObjectURL(blob);
+        
+        Modal.info({
+          title: '图片预览',
+          width: '80%',
+          content: (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <img 
+                src={blobUrl} 
+                style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }} 
+                alt="文件预览"
+              />
+            </div>
+          ),
+          onCancel: () => {
+            window.URL.revokeObjectURL(blobUrl);
+          }
+        });
+      } else if (contentType === 'application/pdf') {
+        // PDF文件，尝试在新窗口打开或使用PDF.js预览
+        message.info('正在打开PDF预览...');
+        const blobUrl = window.URL.createObjectURL(blob);
+        const newWindow = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+        
+        if (!newWindow) {
+          // 弹出窗口被阻止，使用Modal提示用户下载
+          message.warning('PDF预览窗口被阻止，建议下载后查看');
+          window.URL.revokeObjectURL(blobUrl);
+        } else {
+          // 为PDF文件设置定时器释放资源
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 1000 * 60 * 5); // 5分钟后释放资源
+        }
+      } else if (contentType.startsWith('application/vnd.ms-') || contentType.includes('openxmlformats-officedocument')) {
+        // Office文档（Excel, Word, PowerPoint等）
+        message.destroy();
+        message.warning('该文件类型（Excel/Word/PowerPoint）不支持在浏览器中预览，建议下载后查看');
+      } else {
+        // 其他非文本文件，尝试在新窗口打开或提示下载
+        message.info('正在打开文件预览...');
+        const blobUrl = window.URL.createObjectURL(blob);
+        const newWindow = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+        
+        if (!newWindow) {
+          // 弹出窗口被阻止，提示用户下载
+          message.warning('文件预览窗口被阻止，建议下载后查看');
+          window.URL.revokeObjectURL(blobUrl);
+        } else {
+          // 为非文本文件设置定时器释放资源
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 1000 * 60 * 5); // 5分钟后释放资源
+        }
+      }
+    } catch (error) {
+      console.error('文件预览失败:', error);
+      message.error('文件预览失败：' + simplifyError(error));
+    }
+  };
+
+  // MIME类型到文件扩展名的映射表
+  const mimeToExtension = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/bmp': '.bmp',
+    'image/webp': '.webp',
+    'application/pdf': '.pdf',
+    'text/plain': '.txt',
+    'text/csv': '.csv',
+    'text/html': '.html',
+    'text/css': '.css',
+    'text/javascript': '.js',
+    'application/json': '.json',
+    'application/msword': '.doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.ms-excel': '.xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.ms-powerpoint': '.ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx'
+  };
+
+  // 文件下载处理函数
+  const handleDownloadFile = async (fileHash) => {
+    try {
+      // 构建文件访问URL
+      const fileUrl = `/attach/${fileHash}`;
+      
+      // 发送GET请求获取文件
+      const response = await axios.get(fileUrl, {
+        responseType: 'blob'
+      });
+      
+      // 创建下载链接
+      const downloadUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      
+      // 从响应头获取文件类型
+      const contentType = response.headers['content-type'] || 'application/octet-stream';
+      
+      // 设置文件名（尝试从响应头获取，如果没有则使用哈希值）
+      const contentDisposition = response.headers['content-disposition'];
+      let fileName = fileHash;
+      
+      if (contentDisposition) {
+        const matches = contentDisposition.match(/filename\*?=([^;]+)/);
+        if (matches && matches[1]) {
+          fileName = matches[1].replace(/['"]/g, '');
+        }
+      } else {
+        // 如果没有从响应头获取到文件名，根据MIME类型添加扩展名
+        const extension = mimeToExtension[contentType] || '.bin';
+        fileName = `${fileHash}${extension}`;
+      }
+      
+      link.setAttribute('download', fileName);
+      
+      // 触发下载
+      document.body.appendChild(link);
+      link.click();
+      
+      // 清理
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      
+      message.success('文件下载开始');
+    } catch (error) {
+      console.error('文件下载失败:', error);
+      message.error('文件下载失败：' + simplifyError(error));
+    }
+  };
+
   // 按钮处理器：按年月范围查询
-  const handleGetDataByYearMonthRange = async () => {
-    if (!startYearMonth || !endYearMonth) {
-      message.warning('请选择开始年月和结束年月');
+  const handleGetDataByYearMonthRange = async (startDate = startYearMonth, endDate = endYearMonth) => {
+    // 首先检查参数是否存在
+    if (!startDate || !endDate) {
+      // 如果参数不存在，使用状态变量
+      startDate = startYearMonth;
+      endDate = endYearMonth;
+      
+      // 如果状态变量也不存在，提示用户选择日期
+      if (!startDate || !endDate) {
+        message.warning('请选择开始年月和结束年月');
+        return;
+      }
+    }
+    
+    // 检查日期对象是否有效（支持Day.js和Moment.js对象）
+    let processedStartDate, processedEndDate;
+    
+    try {
+      // 尝试将日期对象转换为dayjs对象
+      processedStartDate = dayjs(startDate);
+      processedEndDate = dayjs(endDate);
+      
+      // 检查转换后的日期是否有效
+      if (!processedStartDate.isValid() || !processedEndDate.isValid()) {
+        console.error('日期转换无效:', { startDate, endDate });
+        message.error('日期格式无效，请重新选择');
+        return;
+      }
+    } catch (error) {
+      console.error('日期处理失败:', error);
+      message.error('日期处理失败，请重新选择');
       return;
     }
     
-    const startDateStr = startYearMonth.format('YYYY-MM');
-    const endDateStr = endYearMonth.format('YYYY-MM');
+    // 使用处理后的日期对象
+    startDate = processedStartDate;
+    endDate = processedEndDate;
+    
+    const startDateStr = startDate.format('YYYY-MM');
+    const endDateStr = endDate.format('YYYY-MM');
     
     const [startYear, startMonth] = startDateStr.split('-').map(Number);
     const [endYear, endMonth] = endDateStr.split('-').map(Number);
@@ -1732,6 +2159,8 @@ const FileUploadForm = () => {
               setActiveView('roleManagement');
               fetchRoleList();
             }}
+            disabled={!hasRoleManagementPermission}
+            loading={permissionLoading}
           >
             {isMobile ? '' : '角色管理'}
           </Button>
@@ -1742,6 +2171,8 @@ const FileUploadForm = () => {
             icon={<PlusOutlined />} 
             size={isMobile ? 'small' : 'middle'}
             onClick={() => setActiveView('register')}
+            disabled={!hasRegisterPermission}
+            loading={permissionLoading}
           >
             {isMobile ? '' : '项目注册'}
           </Button>
@@ -1779,6 +2210,8 @@ const FileUploadForm = () => {
                           type="link"
                           onClick={() => handleProjectUpload(project)}
                           style={{ padding: '0 4px' }}
+                          disabled={!project.isUserAuthorizedSubmitter}
+                          loading={permissionLoading}
                         >
                           上传
                         </Button>
@@ -1795,6 +2228,8 @@ const FileUploadForm = () => {
                           type="link"
                           onClick={() => handleAddAuthorizerForProject(project)}
                           style={{ padding: '0 4px' }}
+                          disabled={!project.isUserAuthorizedSubmitter}
+                          loading={permissionLoading}
                         >
                           授权
                         </Button>
@@ -1976,20 +2411,23 @@ const FileUploadForm = () => {
             
             {/* 文件上传 */}
             <Card title="文件上传" style={cardStyle} size={isMobile ? 'small' : 'default'}>
-              <Form.Item name="files">
-                <Upload
-                  multiple
-                  beforeUpload={() => false}
-                  onChange={handleFileChange}
-                  fileList={selectedFiles}
-                  customRequest={({ file, onSuccess }) => {
-                    onSuccess('success');
-                  }}
-                >
-                  <Button icon={<UploadOutlined />} size={isMobile ? 'small' : 'middle'}>
-                    {isMobile ? '选择文件' : '选择多个文件'}
-                  </Button>
-                </Upload>
+              <Form.Item name="files" rules={[{ required: true, message: '请至少选择一个文件' }]}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span style={{ color: '#ff4d4f', marginRight: 4, fontSize: isMobile ? '12px' : '14px' }}>*</span>
+                  <Upload
+                    multiple
+                    beforeUpload={() => false}
+                    onChange={handleFileChange}
+                    fileList={selectedFiles}
+                    customRequest={({ file, onSuccess }) => {
+                      onSuccess('success');
+                    }}
+                  >
+                    <Button icon={<UploadOutlined />} size={isMobile ? 'small' : 'middle'}>
+                      {isMobile ? '选择文件' : '选择多个文件'}
+                    </Button>
+                  </Upload>
+                </div>
               </Form.Item>
               
               {selectedFiles.length > 0 && (
@@ -2311,7 +2749,25 @@ const FileUploadForm = () => {
               })()}
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all' }}>{latestDataResult.dataHash}</span></p>
               <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>提交者:</strong> {latestDataResult.submitter}</p>
-              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>提交时间:</strong> {new Date(latestDataResult.submitTime).toLocaleString()}</p>
+              <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 12 }}><strong>提交时间:</strong> {new Date(latestDataResult.submitTime).toLocaleString()}</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Button 
+                  type="default" 
+                  icon={<EyeOutlined />} 
+                  size={isMobile ? 'small' : 'middle'}
+                  onClick={() => handlePreviewFile(latestDataResult.dataHash)}
+                >
+                  预览文件
+                </Button>
+                <Button 
+                  type="primary" 
+                  icon={<DownloadOutlined />} 
+                  size={isMobile ? 'small' : 'middle'}
+                  onClick={() => handleDownloadFile(latestDataResult.dataHash)}
+                >
+                  下载文件
+                </Button>
+              </div>
             </Card>
           )}
                       </div>
@@ -2330,7 +2786,7 @@ const FileUploadForm = () => {
                         {/* 历史数据页签内容 */}
                         <div style={{ marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                           {/* 按日期查询 */}
-                          <div style={{ flex: '1 1 auto' }}>
+                          {/* <div style={{ flex: '1 1 auto' }}>
                             <div style={{ marginBottom: 12, fontWeight: 'bold', fontSize: isMobile ? '14px' : '16px' }}>按日期查询</div>
                             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                               <Button 
@@ -2343,12 +2799,12 @@ const FileUploadForm = () => {
                                 选择日期查询
                               </Button>
                             </div>
-                          </div>
+                          </div> */}
                           
                           {/* 按年月范围查询（放在右边） */}
                           <div style={{ flex: '1 1 auto' }}>
                             <div style={{ marginBottom: 12, fontWeight: 'bold', fontSize: isMobile ? '14px' : '16px' }}>按年月范围查询</div>
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                               <DatePicker
                                 picker="month"
                                 placeholder="开始年月"
@@ -2357,6 +2813,7 @@ const FileUploadForm = () => {
                                 value={startYearMonth}
                                 onChange={(date) => setStartYearMonth(date)}
                               />
+                              <span style={{ margin: '0 -4px', fontSize: isMobile ? '12px' : '16px' }}>-</span>
                               <DatePicker
                                 picker="month"
                                 placeholder="结束年月"
@@ -2367,7 +2824,7 @@ const FileUploadForm = () => {
                               />
                               <Button
                                 type="primary"
-                                onClick={handleGetDataByYearMonthRange}
+                                onClick={() => handleGetDataByYearMonthRange()}
                                 loading={isProcessing}
                                 size={isMobile ? 'small' : 'middle'}
                               >
@@ -2434,7 +2891,27 @@ const FileUploadForm = () => {
                                         
                                         <p style={{ marginBottom: 4 }}><strong>数据哈希:</strong> <span style={{ wordBreak: 'break-all', fontSize: isMobile ? '10px' : '12px' }}>{dataItem.dataHash}</span></p>
                                         <p style={{ marginBottom: 4 }}><strong>提交者:</strong> <span style={{ wordBreak: 'break-all', fontSize: isMobile ? '10px' : '12px' }}>{dataItem.submitter}</span></p>
-                                        <p style={{ marginBottom: 8, color: '#666' }}>提交时间: {new Date(dataItem.submitTime).toLocaleString()}</p>
+                                        <p style={{ marginBottom: 12, color: '#666' }}>提交时间: {new Date(dataItem.submitTime).toLocaleString()}</p>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                          <Button 
+                                            type="default" 
+                                            icon={<EyeOutlined />} 
+                                            size={isMobile ? 'small' : 'middle'}
+                                            onClick={() => handlePreviewFile(dataItem.dataHash)}
+                                            style={{ fontSize: isMobile ? '10px' : '12px', padding: isMobile ? '4px 8px' : '6px 12px' }}
+                                          >
+                                            预览
+                                          </Button>
+                                          <Button 
+                                            type="primary" 
+                                            icon={<DownloadOutlined />} 
+                                            size={isMobile ? 'small' : 'middle'}
+                                            onClick={() => handleDownloadFile(dataItem.dataHash)}
+                                            style={{ fontSize: isMobile ? '10px' : '12px', padding: isMobile ? '4px 8px' : '6px 12px' }}
+                                          >
+                                            下载
+                                          </Button>
+                                        </div>
                                       </div>
                                     </Card>
                                   ))}
@@ -2444,21 +2921,12 @@ const FileUploadForm = () => {
                           </div>
                         )}
                         {/* 按日期查询结果 */}
-                        {dataResult && (
+                        {/* {dataResult && (
                           <Card 
                             title="查询结果"
                             style={cardStyle}
                             size={isMobile ? 'small' : 'default'}
                           >
-                            {/* <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>项目ID:</strong> {
-                              (() => {
-                                try {
-                                  return ethers.decodeBytes32String(dataResult.pid);
-                                } catch {
-                                  return dataResult.pid;
-                                }
-                              })()
-                            }</p> */}
                             <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>DataID:</strong> {
                               (() => {
                                 try {
@@ -2494,7 +2962,7 @@ const FileUploadForm = () => {
                             <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 4 }}><strong>提交者:</strong> {dataResult.submitter}</p>
                             <p style={{ fontSize: isMobile ? '12px' : '14px', marginBottom: 0 }}><strong>提交时间:</strong> {new Date(dataResult.submitTime).toLocaleString()}</p>
                           </Card>
-                        )}
+                        )} */}
                       </div>
                     )
                   }

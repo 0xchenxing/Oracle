@@ -1,0 +1,36 @@
+网址：
+47.83.143.86
+http://oracle.hkbtaa.org/
+https://oracle.hkbtaa.org/
+
+自动续期ssl证书脚本目录位置：/usr/local/bin/auto_renew_ssl.sh
+
+本地puTTy目录下上传react到服务器：
+pscp -r -i "D:\Oracle.ppk" "C:\Users\chenyukang\Desktop\Oracle\frontend\build\*" root@47.83.143.86:/usr/share/nginx/html/
+本地puTTy目录下上传gin到服务器：
+pscp -p -i "D:\Oracle.ppk" C:\Users\chenyukang\Desktop\Oracle\backend\oracle-backend-linux root@47.83.143.86:/home/gin-app/
+
+
+nginx配置文件路径：/etc/nginx/nginx.conf
+文件上传目录：/home/gin-app/uploads/
+
+
+检查配置文件语法：
+sudo nginx -t
+nginx服务器一键重启：
+sudo nginx -t && sudo systemctl restart nginx && sudo systemctl status nginx
+
+
+加执行权限
+chmod +x oracle-backend-linux
+使用 nohup 方式启动
+nohup ./oracle-backend-linux > app.log 2>&1 &
+查看进程
+ps aux | grep oracle-backend-linux 内存占比
+ps -ef |grep oracle-backend-linux 完整父子进程关系
+测试访问
+curl http://localhost:8080/health
+查看日志
+tail -f /home/gin-app/app.log
+停止应用
+pkill -f oracle-backend-linux

@@ -16,7 +16,7 @@ import (
 
 // UploadFile 处理文件上传的业务逻辑
 func UploadFile(file multipart.File, header *multipart.FileHeader, projectId, projectDescription, hashResults,
-	signatureDataStr, signature string) (*models.FileUploadResult, error) {
+	signatureDataStr, signature, chainId string) (*models.FileUploadResult, error) {
 	// 1. 验证签名
 	if signatureDataStr == "" || signature == "" {
 		return nil, fmt.Errorf("签名数据不完整")
@@ -131,46 +131,35 @@ func UploadFile(file multipart.File, header *multipart.FileHeader, projectId, pr
 		}
 	}
 
-	// 6. 保存文件（保持不变）
+	// 6. 保存文件（只使用项目ID作为文件夹名称）
 	projectDirName := projectId
-	if projectDescription != "" {
-		projectDirName = fmt.Sprintf("%s-%s", projectId, sanitizeFileName(projectDescription))
-	}
 
+	// 获取当前工作目录（程序运行所在目录）
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	var backendRoot string
-	if strings.Contains(cwd, "backend") {
-		backendIndex := strings.LastIndex(cwd, "backend")
-		backendRoot = cwd[:backendIndex+len("backend")]
-	} else {
-		potentialBackend := filepath.Join(cwd, "backend")
-		if _, err := os.Stat(potentialBackend); err == nil {
-			backendRoot = potentialBackend
-		} else {
-			backendRoot = cwd
-		}
+	// 构建上传目录路径：直接在程序运行目录下的uploads目录
+	// 构建上传目录路径，添加链ID子目录
+	// 如果chainId为空，使用"default"作为默认值
+	chainDirName := chainId
+	if chainDirName == "" {
+		chainDirName = "default"
 	}
-
-	if _, err := os.Stat(backendRoot); os.IsNotExist(err) {
-		if err := os.MkdirAll(backendRoot, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create backend directory: %w", err)
-		}
-	}
-
-	uploadDir := filepath.Join(backendRoot, "uploads", projectDirName)
+	uploadDir := filepath.Join(cwd, "uploads", chainDirName, projectDirName)
+	fmt.Printf("Upload directory: %s\n", uploadDir)
 	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(uploadDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create project directory: %w", err)
 		}
 	}
 
-	timestamp := time.Now().UnixNano() / int64(time.Millisecond)
-	uniqueFileName := fmt.Sprintf("%s_%d_%s", fileHash, timestamp, header.Filename)
+	// 保留原始文件扩展名，使用哈希值作为文件名
+	extension := filepath.Ext(header.Filename)
+	uniqueFileName := fmt.Sprintf("%s%s", fileHash, extension)
 	filePath := filepath.Join(uploadDir, uniqueFileName)
+	fmt.Printf("File path: %s\n", filePath)
 
 	dst, err := os.Create(filePath)
 	if err != nil {
@@ -195,22 +184,4 @@ func UploadFile(file multipart.File, header *multipart.FileHeader, projectId, pr
 	}
 
 	return result, nil
-}
-
-// sanitizeFileName 清理文件名中的特殊字符，确保安全
-func sanitizeFileName(name string) string {
-	// 创建一个字符映射，将不安全的字符替换为下划线
-	var result []rune
-	for _, char := range name {
-		// 允许字母、数字、下划线、连字符和中文字符
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '_' || char == '-' ||
-			(char >= 0x4e00 && char <= 0x9fa5) {
-			result = append(result, char)
-		} else {
-			// 不安全的字符替换为下划线
-			result = append(result, '_')
-		}
-	}
-	return string(result)
 }

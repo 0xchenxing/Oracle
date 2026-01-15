@@ -21,7 +21,10 @@ func UploadFile(c *gin.Context) {
 	coreData := c.PostForm("coreData")
 	hashResults := c.PostForm("hashResults")
 
-	// 新增：获取签名相关数据
+	// 获取链ID
+	chainId := c.PostForm("chainId")
+
+	// 获取签名相关数据
 	signatureData := c.PostForm("signatureData")
 	signature := c.PostForm("signature")
 
@@ -59,8 +62,8 @@ func UploadFile(c *gin.Context) {
 		}
 		defer file.Close()
 
-		// 调用服务层处理文件上传，传递签名相关数据
-		result, err := service.UploadFile(file, fileHeader, projectId, projectDescription, hashResults, signatureData, signature)
+		// 调用服务层处理文件上传，传递签名相关数据和链ID
+		result, err := service.UploadFile(file, fileHeader, projectId, projectDescription, hashResults, signatureData, signature, chainId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "上传失败",
@@ -98,6 +101,11 @@ func GetFileByHash(c *gin.Context) {
 		return
 	}
 
+	// 移除哈希值中的0x前缀（如果存在）
+	if strings.HasPrefix(hash, "0x") {
+		hash = hash[2:]
+	}
+
 	// 查找包含该哈希值的文件
 	filePath, err := findFileByHash(hash)
 	if err != nil {
@@ -114,27 +122,14 @@ func GetFileByHash(c *gin.Context) {
 
 // findFileByHash 根据哈希值查找文件
 func findFileByHash(hash string) (string, error) {
-	// 获取当前工作目录
+	// 获取当前工作目录（程序运行所在目录）
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	// 构建正确的uploads目录路径：确保uploads目录始终在backend目录下
-	var backendRoot string
-
-	// 检查当前工作目录是否包含backend目录
-	if strings.Contains(cwd, "backend") {
-		// 找到backend目录的位置
-		backendIndex := strings.LastIndex(cwd, "backend")
-		backendRoot = cwd[:backendIndex+len("backend")]
-	} else {
-		// 如果当前目录不包含backend目录，假设backend目录在当前目录的子目录中
-		backendRoot = filepath.Join(cwd, "backend")
-	}
-
-	// 创建uploads目录路径
-	uploadsDir := filepath.Join(backendRoot, "uploads")
+	// 直接在程序运行目录下的uploads目录查找
+	uploadsDir := filepath.Join(cwd, "uploads")
 
 	var foundFilePath string
 	err = filepath.Walk(uploadsDir, func(path string, info os.FileInfo, err error) error {
@@ -147,12 +142,11 @@ func findFileByHash(hash string) (string, error) {
 			return nil
 		}
 
-		// 检查文件名是否包含指定的哈希值
-		// 文件名格式: 完整哈希_timestamp_原始文件名
-		prefixMatch := strings.HasPrefix(info.Name(), hash+"_")
-		fullMatch := strings.Contains(info.Name(), "_"+hash+".")
+		// 检查文件名是否以哈希值开头（可能包含扩展名）
+		// 文件名格式: 哈希值.扩展名
+		prefixMatch := strings.HasPrefix(info.Name(), hash)
 
-		if prefixMatch || fullMatch {
+		if prefixMatch {
 			// 检查完整哈希的匹配
 			foundFilePath = path
 			return filepath.SkipDir // 找到第一个匹配的文件后停止遍历

@@ -29,8 +29,8 @@ export const NETWORK_CONFIGS = {
     name: 'Polygon Mainnet',
     chainId: '0x89',
     currency: {
-      name: 'MATIC',
-      symbol: 'MATIC',
+      name: 'POL',
+      symbol: 'POL',
       decimals: 18
     },
     contractAddress: null
@@ -41,8 +41,8 @@ export const NETWORK_CONFIGS = {
     name: 'Polygon Mumbai',
     chainId: '0x13881',
     currency: {
-      name: 'MATIC',
-      symbol: 'MATIC',
+      name: 'POL',
+      symbol: 'POL',
       decimals: 18
     },
     contractAddress: null
@@ -69,7 +69,6 @@ export const NETWORK_CONFIGS = {
       symbol: 'BNB',
       decimals: 18
     },
-    // rpcUrl: 'https://data-seed-prebsc-1-s3.bnbchain.org:8545',
     contractAddress: '0xE77EccaF51D66cE185A44d2C3c22fc7F91461A0f'
   }
 };
