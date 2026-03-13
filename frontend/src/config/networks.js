@@ -21,7 +21,7 @@ export const NETWORK_CONFIGS = {
       symbol: 'ETH',
       decimals: 18
     },
-    contractAddress: null
+    contractAddress: "0xdD31221DfA5ecc57D68B05c6e37dE20449290ccd"
   },
   
   // Polygon 主网
